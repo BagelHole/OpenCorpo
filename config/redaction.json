@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "audit": {
+    "redactKeys": [
+      "token",
+      "password",
+      "secret",
+      "authorization",
+      "apiKey",
+      "refreshToken",
+      "clientSecret"
+    ],
+    "mask": "[REDACTED]"
+  }
+}

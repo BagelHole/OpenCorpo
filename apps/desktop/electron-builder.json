@@ -1,0 +1,52 @@
+{
+  "appId": "ai.opencorpo.desktop",
+  "productName": "OpenCorpo",
+  "asar": true,
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../daemon/src",
+      "to": "daemon/src"
+    },
+    {
+      "from": "../../config",
+      "to": "templates/config"
+    },
+    {
+      "from": "../../plugins",
+      "to": "templates/plugins"
+    },
+    {
+      "from": "../../userland",
+      "to": "templates/userland"
+    },
+    {
+      "from": ".runtime/bun",
+      "to": "bun"
+    }
+  ],
+  "directories": {
+    "output": "../../dist/desktop"
+  },
+  "mac": {
+    "target": ["dmg", "zip"],
+    "category": "public.app-category.business"
+  },
+  "win": {
+    "target": ["nsis", "zip"]
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "category": "Utility",
+    "maintainer": "OpenCorpo Team <oss@opencorpo.ai>",
+    "artifactName": "OpenCorpo-${version}-${arch}.${ext}",
+    "executableName": "opencorpo"
+  },
+  "deb": {
+    "packageName": "opencorpo-desktop"
+  }
+}

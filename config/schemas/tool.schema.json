@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenCorpo Tool",
+  "type": "object",
+  "required": ["name", "version", "risk", "capabilities"],
+  "properties": {
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "inputs": { "type": "object" },
+    "outputs": { "type": "object" }
+  },
+  "additionalProperties": true
+}

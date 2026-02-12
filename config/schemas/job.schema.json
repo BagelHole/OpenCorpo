@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenCorpo Job",
+  "type": "object",
+  "required": ["name", "enabled"],
+  "properties": {
+    "name": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "schedule": {
+      "type": "object",
+      "properties": {
+        "cron": { "type": "string" },
+        "timezone": { "type": "string" },
+        "interval_seconds": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "capabilities_required": { "type": "array", "items": { "type": "string" } },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool"],
+        "properties": {
+          "tool": { "type": "string" },
+          "with": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "script": { "type": "object" },
+    "approval": { "type": "object" }
+  },
+  "additionalProperties": true
+}

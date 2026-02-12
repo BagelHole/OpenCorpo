@@ -1,0 +1,18 @@
+{
+  "name": "opencorpo",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*", "plugins/*"],
+  "scripts": {
+    "dev:daemon": "bun run apps/daemon/src/index.ts",
+    "dev:desktop": "npm --prefix apps/desktop run dev",
+    "dev:renderer": "npm --prefix apps/desktop run dev:renderer",
+    "dev:electron": "npm --prefix apps/desktop run dev:electron",
+    "build:daemon": "bun --version",
+    "build:desktop": "npm --prefix apps/desktop run build",
+    "pack:desktop": "npm --prefix apps/desktop run pack",
+    "dist:desktop": "npm --prefix apps/desktop run dist",
+    "test:smoke:daemon": "sh -c 'if command -v bun >/dev/null 2>&1; then bun test apps/daemon/test; else echo \"Skipping daemon smoke tests (bun missing).\"; fi'",
+    "test:smoke:desktop": "npm --prefix apps/desktop run build",
+    "test:smoke": "npm run test:smoke:daemon && npm run test:smoke:desktop"
+  }
+}

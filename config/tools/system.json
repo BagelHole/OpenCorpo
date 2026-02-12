@@ -1,0 +1,14 @@
+{
+  "name": "system.ping",
+  "version": "0.0.1",
+  "risk": "low",
+  "capabilities": ["system.ping"],
+  "inputs": {
+    "type": "object",
+    "properties": { "message": { "type": "string" } }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": { "ok": { "type": "boolean" }, "echo": { "type": "string" } }
+  }
+}

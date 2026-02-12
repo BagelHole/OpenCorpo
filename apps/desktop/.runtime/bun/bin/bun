@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "Bundled Bun runtime is missing. Rebuild with Bun installed."
+exit 1

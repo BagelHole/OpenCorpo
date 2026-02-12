@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenCorpo Workflow",
+  "type": "object",
+  "required": ["name", "enabled"],
+  "properties": {
+    "name": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "trigger": { "type": "object" },
+    "steps": { "type": "array" }
+  },
+  "additionalProperties": true
+}

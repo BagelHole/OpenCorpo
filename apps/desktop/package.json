@@ -1,0 +1,45 @@
+{
+  "name": "@opencorpo/desktop",
+  "version": "0.0.2",
+  "private": true,
+  "description": "Desktop-first OpenCorpo application",
+  "homepage": "https://github.com/toby/OpenCorpo",
+  "author": "Toby Miller <toby@opencorpo.ai> | github.com/bagelhole",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "dev:renderer": "vite",
+    "dev:electron": "electron .",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepare:bun-runtime": "node scripts/prepare-bun-runtime.mjs",
+    "pack": "npm run prepare:bun-runtime && npm run build && electron-builder --dir --config electron-builder.json",
+    "dist": "npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json"
+  },
+  "dependencies": {
+    "@ai-sdk/vercel": "^1.0.10",
+    "ai": "^4.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.4.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.2.0",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^8.2.2",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}

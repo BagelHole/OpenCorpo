@@ -1,0 +1,7 @@
+{
+  "name": "core",
+  "version": "0.0.1",
+  "permissions": ["system.ping"],
+  "tools": ["system.ping"],
+  "entry": "handler.ts"
+}

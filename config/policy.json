@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "rules": [
+    {
+      "id": "default-approve-high-risk",
+      "match": { "risk": "high" },
+      "decision": "approve",
+      "reason": "High-risk actions require approval by default."
+    }
+  ]
+}

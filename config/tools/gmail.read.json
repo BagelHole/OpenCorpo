@@ -1,0 +1,14 @@
+{
+  "name": "gmail.read",
+  "version": "0.0.1",
+  "risk": "medium",
+  "capabilities": ["gmail.read"],
+  "inputs": {
+    "type": "object",
+    "properties": { "id": { "type": "string" } }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": { "message": { "type": "object" } }
+  }
+}
