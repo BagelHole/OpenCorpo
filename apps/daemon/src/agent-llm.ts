@@ -59,7 +59,7 @@ function createModel(db: DbHandle, apiKey: string) {
   const resolvedProvider =
     configuredProvider === "openai"
       ? "openai"
-      : configuredProvider === "anthropic" || configuredProvider === "local"
+      : ["anthropic", "local", "gateway"].includes(configuredProvider)
         ? "gateway"
         : inferProviderFromKey(apiKey);
 

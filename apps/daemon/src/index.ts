@@ -877,6 +877,17 @@ app.post("/secrets/ai-key", ({ body }) => {
   process.env.VERCEL_AI_API_KEY = value;
   return { ok: true };
 });
+
+app.post("/secrets/ai-provider", ({ body }) => {
+  const payload = asObject(body);
+  const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
+  if (!provider) return { ok: false, error: "provider_required" };
+  const valid = ["openai", "anthropic", "local", "gateway"];
+  if (!valid.includes(provider)) return { ok: false, error: "invalid_provider" };
+  setSecretRef(db, { name: "ai.provider", value: provider, provider: "local_file" });
+  process.env.OPENCORPO_AI_PROVIDER = provider;
+  return { ok: true };
+});
 app.get("/stream", ({ request, set }) => {
   set.headers["content-type"] = "text/event-stream";
   set.headers["cache-control"] = "no-cache";
