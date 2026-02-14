@@ -8,7 +8,7 @@
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "dev": "concurrently -k \"vite\" \"wait-on -t 30000 http://127.0.0.1:5173 && electron .\"",
     "dev:renderer": "vite",
     "dev:electron": "electron .",
     "build": "vite build",
@@ -18,8 +18,9 @@
     "dist": "npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json"
   },
   "dependencies": {
-    "@ai-sdk/vercel": "^1.0.10",
-    "ai": "^4.0.0",
+    "@ai-sdk/react": "^3.0.0",
+    "@ai-sdk/gateway": "^3.0.0",
+    "ai": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.4.5",

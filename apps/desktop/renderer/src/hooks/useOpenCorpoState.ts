@@ -192,12 +192,23 @@ export function useOpenCorpoState() {
   );
 
   const refreshDaemonStatus = useCallback(async () => {
-    if (!window.opencorpo?.daemon) return;
-    const runtime = await window.opencorpo.daemon.getRuntimeConfig();
-    setApiBase(runtime.apiBase);
-    setLaunchToken(runtime.launchToken);
-    const status = await window.opencorpo.daemon.getStatus();
-    setDaemonStatus(status);
+    if (!window.opencorpo?.daemon) {
+      setApiError(
+        "Electron bridge not available. Run 'npm run build' then 'npx electron .' from apps/desktop."
+      );
+      return null;
+    }
+    try {
+      const runtime = await window.opencorpo.daemon.getRuntimeConfig();
+      setApiBase(runtime.apiBase);
+      setLaunchToken(runtime.launchToken);
+      const status = await window.opencorpo.daemon.getStatus();
+      setDaemonStatus(status);
+      return status;
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : "Failed to get daemon status");
+      return null;
+    }
   }, []);
 
   const refreshData = useCallback(async () => {
@@ -358,6 +369,26 @@ export function useOpenCorpoState() {
     [refreshData, requestJson]
   );
 
+  const saveAiKey = useCallback(
+    async (key: string) => {
+      await requestJson("/secrets/ai-key", {
+        method: "POST",
+        body: JSON.stringify({ value: key, provider: onboarding.aiProvider })
+      });
+      await restartDaemon();
+    },
+    [onboarding.aiProvider, requestJson, restartDaemon]
+  );
+
+  const checkAiKeyConfigured = useCallback(async () => {
+    try {
+      const res = await requestJson("/secrets/ai-key/status");
+      return Boolean((res as { configured?: boolean }).configured);
+    } catch {
+      return false;
+    }
+  }, [requestJson]);
+
   const getGmailOauthStart = useCallback(async () => {
     return requestJson("/connectors/gmail/oauth/start");
   }, [requestJson]);
@@ -367,10 +398,11 @@ export function useOpenCorpoState() {
     async function init() {
       setLoading(true);
       try {
-        await refreshDaemonStatus();
-        await refreshData();
-        await runDiagnosticsNow();
-        await loadChatHistory();
+        const status = await refreshDaemonStatus();
+        if (mounted && status?.ready) {
+          await refreshData();
+          await runDiagnosticsNow();
+        }
       } catch (error) {
         if (mounted) {
           setApiError(error instanceof Error ? error.message : "Failed to initialize");
@@ -387,7 +419,7 @@ export function useOpenCorpoState() {
       mounted = false;
       clearInterval(interval);
     };
-  }, [loadChatHistory, refreshDaemonStatus, refreshData, runDiagnosticsNow]);
+  }, [refreshDaemonStatus, refreshData, runDiagnosticsNow]);
 
   const onboardingReady = useMemo(
     () => onboarding.completed,
@@ -432,6 +464,8 @@ export function useOpenCorpoState() {
     runJob,
     toggleJob,
     saveGmailToken,
+    saveAiKey,
+    checkAiKeyConfigured,
     getGmailOauthStart,
     refreshData
   };

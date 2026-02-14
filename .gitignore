@@ -13,3 +13,9 @@ dist/
 build/
 out/
 *.tsbuildinfo
+
+# Database & runtime data
+data/
+*.db
+*.db-shm
+*.db-wal

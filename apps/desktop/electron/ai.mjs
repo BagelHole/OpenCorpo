@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { streamText } from "ai";
-import { vercel } from "@ai-sdk/vercel";
+import { gateway } from "@ai-sdk/gateway";
 
 const defaultModel = "anthropic/claude-sonnet-4.5";
 
@@ -16,7 +16,7 @@ export async function runAiChat(messages) {
 
   try {
     const result = await streamText({
-      model: vercel(defaultModel),
+      model: gateway(defaultModel),
       messages
     });
 

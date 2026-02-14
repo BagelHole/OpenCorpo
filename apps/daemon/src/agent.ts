@@ -44,6 +44,8 @@ export type AgentContext = {
   plugins: PluginSummary[];
   controlPlaneRoot: string;
   workspaceRoot: string;
+  /** Tool names that have plugin handlers (for list_available_handlers) */
+  handlerNames?: string[];
 };
 
 const LIST_LIMIT = 8;
@@ -155,7 +157,7 @@ function matchesAny(text: string, tokens: string[]) {
   return tokens.some((token) => text.includes(token));
 }
 
-function buildHelpText() {
+export function buildHelpText() {
   return [
     "Try asking in plain language:",
     "- \"show me pending approvals\"",
@@ -167,7 +169,7 @@ function buildHelpText() {
   ].join("\n");
 }
 
-function buildStatusSummary(context: AgentContext) {
+export function buildStatusSummary(context: AgentContext) {
   const approvals = listApprovals(context.db, 200);
   const pendingApprovals = approvals.filter((item) => item.status === "pending");
   const jobs = listJobs(context.db, 200);
@@ -196,7 +198,7 @@ function buildStatusSummary(context: AgentContext) {
   return lines.join("\n");
 }
 
-function buildApprovalsList(db: DbHandle, pendingOnly: boolean) {
+export function buildApprovalsList(db: DbHandle, pendingOnly: boolean) {
   const approvals = listApprovals(db, 100);
   const filtered = pendingOnly
     ? approvals.filter((item) => item.status === "pending")
@@ -220,7 +222,7 @@ function buildApprovalsList(db: DbHandle, pendingOnly: boolean) {
   ].join("\n");
 }
 
-function buildJobsList(db: DbHandle) {
+export function buildJobsList(db: DbHandle) {
   const jobs = listJobs(db, 100);
   if (jobs.length === 0) {
     return "No jobs yet. Create one in the control plane to get started.";
@@ -236,7 +238,7 @@ function buildJobsList(db: DbHandle) {
   );
 }
 
-function buildJobRunsList(db: DbHandle) {
+export function buildJobRunsList(db: DbHandle) {
   const runs = listJobRuns(db, 10);
   if (runs.length === 0) {
     return "No job runs yet.";
@@ -247,7 +249,7 @@ function buildJobRunsList(db: DbHandle) {
   return [`Recent job runs:`, ...lines].join("\n");
 }
 
-function buildAuditList(db: DbHandle) {
+export function buildAuditList(db: DbHandle) {
   const audit = listAudit(db, 10);
   if (audit.length === 0) {
     return "No audit entries yet.";
@@ -269,7 +271,7 @@ function buildToolRunsList(db: DbHandle) {
   return ["Latest tool runs:", ...lines].join("\n");
 }
 
-function buildToolsList(tools: ToolDefinition[]) {
+export function buildToolsList(tools: ToolDefinition[]) {
   if (tools.length === 0) {
     return "No tools registered yet.";
   }
@@ -279,7 +281,7 @@ function buildToolsList(tools: ToolDefinition[]) {
   return ["Tools loaded:", ...lines, "Say \"tool <name>\" for a specific tool."].join("\n");
 }
 
-function handleToolDetail(tools: ToolDefinition[], name: string) {
+export function handleToolDetail(tools: ToolDefinition[], name: string) {
   const tool = tools.find((entry) => entry.name.toLowerCase() === name.toLowerCase());
   if (!tool) {
     return { text: `Tool "${name}" not found.` };
@@ -316,7 +318,7 @@ function handleToolDetail(tools: ToolDefinition[], name: string) {
   return { text: lines.join("\n") };
 }
 
-function buildPluginsList(plugins: PluginSummary[]) {
+export function buildPluginsList(plugins: PluginSummary[]) {
   if (plugins.length === 0) {
     return "No plugins loaded yet.";
   }
@@ -328,7 +330,7 @@ function buildPluginsList(plugins: PluginSummary[]) {
   return ["Plugins:", ...lines].join("\n");
 }
 
-function buildDataSourceHint(plugins: PluginSummary[], tools: ToolDefinition[]) {
+export function buildDataSourceHint(plugins: PluginSummary[], tools: ToolDefinition[]) {
   const hasGmail = plugins.some((plugin) => plugin.name === "gmail");
   const toolNames = tools.map((tool) => tool.name);
   const lines = [
@@ -345,7 +347,7 @@ function buildDataSourceHint(plugins: PluginSummary[], tools: ToolDefinition[]) 
   return lines.join("\n");
 }
 
-function handleApprovalAction(db: DbHandle, id: number, status: "approved" | "denied") {
+export function handleApprovalAction(db: DbHandle, id: number, status: "approved" | "denied") {
   const approval = getApprovalById(db, id);
   if (!approval) {
     return { text: `Approval #${id} not found.` };
@@ -371,7 +373,7 @@ function handleApprovalAction(db: DbHandle, id: number, status: "approved" | "de
   };
 }
 
-function handleApprovalDetail(db: DbHandle, id: number) {
+export function handleApprovalDetail(db: DbHandle, id: number) {
   const approval = getApprovalById(db, id);
   if (!approval) {
     return { text: `Approval #${id} not found.` };
@@ -385,7 +387,7 @@ function handleApprovalDetail(db: DbHandle, id: number) {
   return { text: lines.join("\n") };
 }
 
-function handleJobDetail(db: DbHandle, id: number) {
+export function handleJobDetail(db: DbHandle, id: number) {
   const job = getJobById(db, id);
   if (!job) {
     return { text: `Job #${id} not found.` };
@@ -400,7 +402,7 @@ function handleJobDetail(db: DbHandle, id: number) {
   return { text: lines.join("\n") };
 }
 
-function handleJobRun(db: DbHandle, id: number) {
+export function handleJobRun(db: DbHandle, id: number) {
   const job = getJobById(db, id);
   if (!job) {
     return { text: `Job #${id} not found.` };
@@ -415,7 +417,7 @@ function handleJobRun(db: DbHandle, id: number) {
   return { text: `Queued job #${job.id} (${job.name}) as run #${runId}.` };
 }
 
-function handleJobRunByName(db: DbHandle, name: string) {
+export function handleJobRunByName(db: DbHandle, name: string) {
   const jobs = listJobs(db, 200);
   const match = jobs.find((job) => job.name.toLowerCase() === name.toLowerCase());
   if (!match) {
@@ -424,7 +426,7 @@ function handleJobRunByName(db: DbHandle, name: string) {
   return handleJobRun(db, match.id);
 }
 
-function handleJobToggle(db: DbHandle, id: number, enabled: boolean) {
+export function handleJobToggle(db: DbHandle, id: number, enabled: boolean) {
   const job = getJobById(db, id);
   if (!job) {
     return { text: `Job #${id} not found.` };
@@ -444,7 +446,7 @@ function handleJobToggle(db: DbHandle, id: number, enabled: boolean) {
   };
 }
 
-function handleJobRunDetail(db: DbHandle, id: number) {
+export function handleJobRunDetail(db: DbHandle, id: number) {
   const run = getJobRunById(db, id);
   if (!run) {
     return { text: `Job run #${id} not found.` };
@@ -461,7 +463,7 @@ function handleJobRunDetail(db: DbHandle, id: number) {
   return { text: lines.join("\n") };
 }
 
-function handleAuditDetail(db: DbHandle, id: number) {
+export function handleAuditDetail(db: DbHandle, id: number) {
   const entry = getAuditById(db, id);
   if (!entry) {
     return { text: `Audit entry #${id} not found.` };
@@ -476,7 +478,7 @@ function handleAuditDetail(db: DbHandle, id: number) {
   return { text: lines.join("\n") };
 }
 
-function handleToolRunDetail(db: DbHandle, id: number) {
+export function handleToolRunDetail(db: DbHandle, id: number) {
   const run = getToolRunById(db, id);
   if (!run) {
     return { text: `Tool run #${id} not found.` };

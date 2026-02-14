@@ -2,7 +2,7 @@
 
 OpenCorpo is a local-first, enterprise-ready business operating system powered by an AI agent that can read, act, schedule work, and safely reconfigure its own system.
 
-This is not a chatbot. OpenCorpo is a self-configuring business OS with forensic-grade security and auditing.
+This is a chatbot and a self-configuring business OS with security and auditing.
 
 ## Core vision
 

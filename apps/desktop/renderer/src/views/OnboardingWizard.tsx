@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,8 @@ type Props = {
   persistOnboarding: (next: OnboardingData) => void;
   completeOnboarding: () => void;
   saveGmailToken: (token: string) => Promise<void>;
+  saveAiKey: (key: string) => Promise<void>;
+  checkAiKeyConfigured: () => Promise<boolean>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
 };
 
@@ -25,10 +27,14 @@ export function OnboardingWizard({
   persistOnboarding,
   completeOnboarding,
   saveGmailToken,
+  saveAiKey,
+  checkAiKeyConfigured,
   getGmailOauthStart
 }: Props) {
   const [step, setStep] = useState(0);
   const [tokenInput, setTokenInput] = useState(onboarding.gmailAccessToken ?? "");
+  const [aiKeyInput, setAiKeyInput] = useState(onboarding.aiKey ?? "");
+  const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -36,6 +42,7 @@ export function OnboardingWizard({
     () => [
       "Welcome",
       "Choose AI Provider",
+      "Enter API Key",
       "Connect Gmail (Optional)",
       "Finish Setup"
     ],
@@ -44,6 +51,30 @@ export function OnboardingWizard({
 
   const saveProvider = (provider: OnboardingData["aiProvider"]) => {
     persistOnboarding({ ...onboarding, aiProvider: provider });
+  };
+
+  useEffect(() => {
+    if (step === 2) {
+      void checkAiKeyConfigured().then(setAiKeyConfigured);
+    }
+  }, [step, checkAiKeyConfigured]);
+
+  const handleSaveAiKey = async () => {
+    if (!aiKeyInput.trim()) {
+      setLocalError("Please enter an API key.");
+      return;
+    }
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await saveAiKey(aiKeyInput.trim());
+      persistOnboarding({ ...onboarding, aiKey: aiKeyInput.trim() });
+      setAiKeyConfigured(true);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Unable to save API key.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const finish = () => {
@@ -147,6 +178,40 @@ export function OnboardingWizard({
           )}
 
           {step === 2 && (
+            <div className="space-y-4 text-sm">
+              <p className="text-slate-600">
+                Enter your API key for {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "your local/BYOK provider"}. You can change this later in settings.
+              </p>
+              <div className="flex items-center gap-3">
+                <span>API key status:</span>
+                <Badge tone={aiKeyConfigured ? "success" : "warning"}>
+                  {aiKeyConfigured ? "Configured" : "Not configured"}
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase tracking-[0.15em] text-slate-500">
+                  API key
+                </label>
+                <input
+                  type="password"
+                  value={aiKeyInput}
+                  onChange={(event) => setAiKeyInput(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  placeholder="Paste your API key"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void handleSaveAiKey()} disabled={saving}>
+                  {saving ? "Saving..." : "Save key"}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">
+                {onboarding.aiProvider === "local" ? "You can skip this step for local/BYOK setups." : "Required for AI-powered chat."}
+              </p>
+            </div>
+          )}
+
+          {step === 3 && (
             <div className="space-y-4 text-sm text-slate-600">
               <div className="flex items-center gap-3">
                 <span>Gmail status:</span>
@@ -180,7 +245,7 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="space-y-3 text-sm text-slate-600">
               <p>Everything is ready. OpenCorpo will now launch your clean workspace.</p>
               <ul className="space-y-1">
@@ -203,7 +268,7 @@ export function OnboardingWizard({
             </Button>
             {step < steps.length - 1 ? (
               <Button onClick={() => setStep((prev) => Math.min(steps.length - 1, prev + 1))}>
-                {step === 2 ? "Continue without Gmail" : "Continue"}
+                {step === 3 ? "Continue without Gmail" : "Continue"}
               </Button>
             ) : (
               <Button onClick={() => void finish()}>Enter OpenCorpo</Button>

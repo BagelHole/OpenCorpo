@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,16 +33,27 @@ type GmailStatus = {
   refreshConfigured: boolean;
 };
 
+type OnboardingData = {
+  completed: boolean;
+  aiProvider: "anthropic" | "openai" | "local";
+  aiKey: string;
+  gmailAccessToken: string;
+};
+
 export function SettingsView({
   daemonStatus,
   diagnostics,
   plugins,
   gmailStatus,
+  onboarding,
+  persistOnboarding,
   onRestartDaemon,
   onRunDiagnostics,
   onRunRepair,
   onGetOauthStart,
   onSaveGmailToken,
+  onSaveAiKey,
+  checkAiKeyConfigured,
   onToggleAdvanced,
   advancedMode,
   apiBase
@@ -51,18 +62,44 @@ export function SettingsView({
   diagnostics: DiagnosticsReport | null;
   plugins: PluginInfo[];
   gmailStatus: GmailStatus;
+  onboarding: OnboardingData;
+  persistOnboarding: (next: OnboardingData) => void;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
   onRunRepair: () => Promise<void>;
   onGetOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   onSaveGmailToken: (token: string) => Promise<void>;
+  onSaveAiKey: (key: string) => Promise<void>;
+  checkAiKeyConfigured: () => Promise<boolean>;
   onToggleAdvanced: (next: boolean) => void;
   advancedMode: boolean;
   apiBase: string;
 }) {
   const [tokenInput, setTokenInput] = useState("");
+  const [aiKeyInput, setAiKeyInput] = useState("");
+  const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
+  const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const pluginFailures = useMemo(() => plugins.filter((item) => !item.loaded), [plugins]);
+
+  useEffect(() => {
+    void checkAiKeyConfigured().then(setAiKeyConfigured);
+  }, [checkAiKeyConfigured]);
+
+  const saveAiKey = async () => {
+    if (!aiKeyInput.trim()) {
+      setAiKeyMessage("Enter an API key first.");
+      return;
+    }
+    try {
+      await onSaveAiKey(aiKeyInput.trim());
+      setAiKeyInput("");
+      setAiKeyConfigured(true);
+      setAiKeyMessage("API key saved.");
+    } catch (error) {
+      setAiKeyMessage(error instanceof Error ? error.message : "Failed to save API key.");
+    }
+  };
 
   const connectOAuth = async () => {
     const start = await onGetOauthStart();
@@ -109,6 +146,56 @@ export function SettingsView({
               Repair now
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border border-slate-200 shadow-sm">
+        <CardHeader>
+          <CardTitle>AI Provider</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-600">
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <span>Provider</span>
+            <span className="text-xs text-slate-500">
+              {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "Local / BYOK"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["anthropic", "openai", "local"] as const).map((value) => (
+              <button
+                key={value}
+                onClick={() => persistOnboarding({ ...onboarding, aiProvider: value })}
+                className={`rounded-xl border px-3 py-1.5 text-sm transition ${
+                  onboarding.aiProvider === value
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                }`}
+              >
+                {value === "anthropic" ? "Anthropic" : value === "openai" ? "OpenAI" : "Local"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <span>API key</span>
+            <Badge tone={aiKeyConfigured ? "success" : "warning"}>
+              {aiKeyConfigured ? "Configured" : "Not configured"}
+            </Badge>
+          </div>
+          <div className="space-y-2">
+            <input
+              type="password"
+              value={aiKeyInput}
+              onChange={(e) => setAiKeyInput(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+              placeholder="Paste API key"
+            />
+            <Button onClick={() => void saveAiKey()}>Save API key</Button>
+          </div>
+          {aiKeyMessage && (
+            <div className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">
+              {aiKeyMessage}
+            </div>
+          )}
         </CardContent>
       </Card>
 

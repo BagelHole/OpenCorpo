@@ -25,6 +25,7 @@ import { buildToolRegistry, validateToolInput } from "./tool-registry";
 import { seedJobsFromConfig } from "./job-config";
 import { addMessage, createSession, getSession, listMessages, listSessions } from "./chat";
 import { runAgent } from "./agent";
+import { runAgentWithLLM, streamAgentWithLLM } from "./agent-llm";
 import { pluginsRoot, workspaceRoot } from "./paths";
 import {
   createCapabilityGrant,
@@ -58,6 +59,15 @@ if (existingGmailAccessToken) {
 const existingGmailRefreshToken = getSecretValue(db, "gmail.refresh_token");
 if (existingGmailRefreshToken) {
   process.env.OPENCORPO_GMAIL_REFRESH_TOKEN = existingGmailRefreshToken;
+}
+const existingAiGatewayApiKey = getSecretValue(db, "ai.api_key");
+if (existingAiGatewayApiKey) {
+  process.env.AI_GATEWAY_API_KEY = existingAiGatewayApiKey;
+  process.env.VERCEL_AI_API_KEY = existingAiGatewayApiKey;
+}
+const existingAiProvider = getSecretValue(db, "ai.provider");
+if (existingAiProvider) {
+  process.env.OPENCORPO_AI_PROVIDER = existingAiProvider.trim().toLowerCase();
 }
 
 const auth = getAuthState();
@@ -316,13 +326,25 @@ app.post("/chat/messages", async ({ body }) => {
     return { ok: true, messageId };
   }
 
-  const reply = await runAgent(content, {
+  const agentContext = {
     db,
     tools: toolRegistry.definitions,
     plugins,
     controlPlaneRoot: controlPlane.root,
-    workspaceRoot
-  });
+    workspaceRoot,
+    handlerNames: Array.from(toolRegistry.handlers.keys())
+  };
+
+  const history = listMessages(db, sessionId, 200);
+  const messages = history.map((m) => ({
+    role: m.role as "user" | "assistant" | "system",
+    content: m.content
+  }));
+
+  let reply = await runAgentWithLLM(messages, agentContext);
+  if (!reply) {
+    reply = await runAgent(content, agentContext);
+  }
   const assistantId = addMessage(db, sessionId, "assistant", reply.text, reply.metadata);
   writeEvent(db, { type: "chat.response.created", data: { id: assistantId } });
 
@@ -332,6 +354,51 @@ app.post("/chat/messages", async ({ body }) => {
     assistantMessageId: assistantId,
     reply: reply.text
   };
+});
+
+app.post("/chat/stream", async ({ body }) => {
+  const payload = asObject(body);
+  const rawMessages = Array.isArray(payload.messages) ? payload.messages : [];
+  // Pass through as UIMessage[] — the AI SDK's convertToModelMessages handles the conversion
+  const messages = rawMessages as Array<{
+    id?: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    parts?: Array<{ type: string; text?: string }>;
+  }>;
+
+  const agentContext = {
+    db,
+    tools: toolRegistry.definitions,
+    plugins,
+    controlPlaneRoot: controlPlane.root,
+    workspaceRoot,
+    handlerNames: Array.from(toolRegistry.handlers.keys())
+  };
+
+  const corsHeaders: Record<string, string> = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type,x-oc-session"
+  };
+
+  const result = await streamAgentWithLLM(messages, agentContext);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ ok: false, error: result.error }), {
+      status: 400,
+      headers: { "content-type": "application/json", ...corsHeaders }
+    });
+  }
+
+  // Clone the response with CORS headers so cross-origin fetch works.
+  // Elysia's onBeforeHandle headers don't apply to raw Response objects.
+  const origHeaders = new Headers(result.response.headers);
+  for (const [k, v] of Object.entries(corsHeaders)) origHeaders.set(k, v);
+  return new Response(result.response.body, {
+    status: result.response.status,
+    statusText: result.response.statusText,
+    headers: origHeaders
+  });
 });
 
 app.get("/approvals", () => ({ ok: true, items: listApprovals(db, 100) }));
@@ -782,6 +849,33 @@ app.get("/secrets", ({ query }) => {
     ok: true,
     items: listSecrets(db, limit)
   };
+});
+app.get("/secrets/ai-key/status", () => {
+  const hasKey = Boolean(
+    process.env.AI_GATEWAY_API_KEY ??
+      process.env.VERCEL_AI_API_KEY ??
+      getSecretValue(db, "ai.api_key")
+  );
+  const provider =
+    process.env.OPENCORPO_AI_PROVIDER ??
+    getSecretValue(db, "ai.provider") ??
+    null;
+  return { ok: true, configured: hasKey, provider };
+});
+app.post("/secrets/ai-key", ({ body }) => {
+  const payload = asObject(body);
+  const value = typeof payload.value === "string" ? payload.value.trim() : "";
+  const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
+  if (!value) return { ok: false, error: "value_required" };
+  setSecretRef(db, { name: "ai.api_key", value });
+  if (provider) {
+    setSecretRef(db, { name: "ai.provider", value: provider });
+    process.env.OPENCORPO_AI_PROVIDER = provider;
+  }
+  // Make key available immediately for this daemon process.
+  process.env.AI_GATEWAY_API_KEY = value;
+  process.env.VERCEL_AI_API_KEY = value;
+  return { ok: true };
 });
 app.get("/stream", ({ request, set }) => {
   set.headers["content-type"] = "text/event-stream";

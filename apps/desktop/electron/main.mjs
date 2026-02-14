@@ -16,17 +16,31 @@ const projectRoot = path.resolve(__dirname, "../../..");
 const templateRoot = isDev
   ? projectRoot
   : path.join(process.resourcesPath, "templates");
-const runtimeRoot = path.join(app.getPath("userData"), "runtime");
-const runtimeConfig = {
-  root: runtimeRoot,
-  dataDir: path.join(runtimeRoot, "data"),
-  configDir: path.join(runtimeRoot, "config"),
-  pluginsDir: path.join(runtimeRoot, "plugins"),
-  userlandDir: path.join(runtimeRoot, "userland"),
-  workspaceDir: path.join(runtimeRoot, "userland", "workspace"),
-  secretsDir: path.join(runtimeRoot, "data", "secrets"),
-  tokenPath: path.join(runtimeRoot, "launch_token")
-};
+// In dev, use project data/ so manual daemon runs share the same token/runtime
+const runtimeRoot = isDev
+  ? path.join(projectRoot, "data")
+  : path.join(app.getPath("userData"), "runtime");
+const runtimeConfig = isDev
+  ? {
+      root: runtimeRoot,
+      dataDir: runtimeRoot,
+      configDir: path.join(projectRoot, "config"),
+      pluginsDir: path.join(projectRoot, "plugins"),
+      userlandDir: path.join(projectRoot, "userland"),
+      workspaceDir: path.join(projectRoot, "userland", "workspace"),
+      secretsDir: path.join(runtimeRoot, "secrets"),
+      tokenPath: path.join(runtimeRoot, "launch_token")
+    }
+  : {
+      root: runtimeRoot,
+      dataDir: path.join(runtimeRoot, "data"),
+      configDir: path.join(runtimeRoot, "config"),
+      pluginsDir: path.join(runtimeRoot, "plugins"),
+      userlandDir: path.join(runtimeRoot, "userland"),
+      workspaceDir: path.join(runtimeRoot, "userland", "workspace"),
+      secretsDir: path.join(runtimeRoot, "data", "secrets"),
+      tokenPath: path.join(runtimeRoot, "launch_token")
+    };
 const runtimeState = {
   launchToken: "",
   daemonPid: null,
@@ -46,8 +60,9 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: "#f8fafc",
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
-      preload: path.join(__dirname, "preload.mjs"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -55,11 +70,23 @@ function createWindow() {
 
   registerZoomShortcuts(win);
 
+  win.once("ready-to-show", () => {
+    win.show();
+    win.focus();
+  });
+
   if (isDev) {
     win.loadURL(devUrl);
   } else {
     win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
+
+  setTimeout(() => {
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+  }, 3000);
 }
 
 function ensureRuntimeDirectory() {
@@ -89,11 +116,16 @@ function daemonEntryPath() {
 }
 
 function resolveBunCommand() {
-  const bundledLinuxBun = path.join(process.resourcesPath, "bun", "bin", "bun");
-  if (!isDev && existsSync(bundledLinuxBun)) {
-    return bundledLinuxBun;
+  const bunExe = process.platform === "win32" ? "bun.exe" : "bun";
+  const bundledBun = path.join(process.resourcesPath, "bun", "bin", bunExe);
+  const devBundledBun = path.join(projectRoot, "apps", "desktop", ".runtime", "bun", "bin", bunExe);
+  if (!isDev && existsSync(bundledBun)) {
+    return bundledBun;
   }
-  return process.env.BUN_BINARY || "bun";
+  if (isDev && existsSync(devBundledBun)) {
+    return devBundledBun;
+  }
+  return process.env.BUN_BINARY || bunExe;
 }
 
 function loadOrCreateLaunchToken() {
@@ -150,8 +182,21 @@ function scheduleDaemonRestart() {
   }, delay);
 }
 
+function loadAiKeyFromSecrets() {
+  try {
+    const keyPath = path.join(runtimeConfig.secretsDir, "ai.api_key.secret");
+    if (existsSync(keyPath)) {
+      const key = readFileSync(keyPath, "utf-8").trim();
+      if (key.length > 0) return key;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 function buildDaemonEnv() {
-  return {
+  const env = {
     ...process.env,
     OPENCORPO_PROJECT_ROOT: projectRoot,
     OPENCORPO_DATA_DIR: runtimeConfig.dataDir,
@@ -163,15 +208,91 @@ function buildDaemonEnv() {
     OPENCORPO_LAUNCH_TOKEN: runtimeState.launchToken,
     OPENCORPO_PORT: String(daemonPort)
   };
+  const aiKey = loadAiKeyFromSecrets();
+  if (aiKey) {
+    env.AI_GATEWAY_API_KEY = aiKey;
+    env.VERCEL_AI_API_KEY = aiKey;
+  }
+  return env;
 }
 
-async function startDaemon() {
+async function isPortInUse() {
+  try {
+    const response = await fetch(`http://127.0.0.1:${daemonPort}/health`);
+    return response.ok || response.status > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function killStaleOnPort() {
+  if (process.platform === "win32") {
+    try {
+      const { execSync } = await import("node:child_process");
+      const result = execSync(
+        `netstat -ano | findstr ":${daemonPort}.*LISTENING"`,
+        { encoding: "utf-8", timeout: 5000 }
+      ).trim();
+      const match = result.match(/LISTENING\s+(\d+)/);
+      if (match) {
+        const pid = match[1];
+        console.log(`[daemon] Killing stale process on port ${daemonPort} (PID ${pid})`);
+        execSync(`taskkill /F /PID ${pid}`, { timeout: 5000 });
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch {
+      // ignore - port may already be free
+    }
+  } else {
+    try {
+      const { execSync } = await import("node:child_process");
+      const result = execSync(`lsof -ti:${daemonPort}`, { encoding: "utf-8", timeout: 5000 }).trim();
+      if (result) {
+        console.log(`[daemon] Killing stale process on port ${daemonPort} (PID ${result})`);
+        execSync(`kill -9 ${result}`, { timeout: 5000 });
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function startDaemon(options = {}) {
+  const forceRestart = Boolean(options.forceRestart);
   if (daemonProcess && !daemonProcess.killed) return;
   bootstrapRuntimeLayout();
   runtimeState.launchToken = loadOrCreateLaunchToken();
+  console.log(`[daemon] Token loaded (${runtimeState.launchToken.length} chars)`);
+
+  // If something is already on our port and accepts our token, reuse it
+  const alreadyHealthy = forceRestart
+    ? false
+    : await checkDaemonHealth(runtimeState.launchToken);
+  if (alreadyHealthy) {
+    console.log("[daemon] Existing daemon is healthy, reusing.");
+    runtimeState.daemonRunning = true;
+    runtimeState.daemonReady = true;
+    runtimeState.daemonPid = null;
+    runtimeState.lastError = null;
+    daemonRestartAttempts = 0;
+    clearRestartTimer();
+    return;
+  }
+
+  // Kill anything stale on our port
+  const portBusy = await isPortInUse();
+  if (portBusy) {
+    console.log("[daemon] Port in use with wrong token, killing stale process.");
+    await killStaleOnPort();
+  }
 
   const command = resolveBunCommand();
   const daemonEntry = daemonEntryPath();
+  console.log(`[daemon] Spawning: ${command} run ${daemonEntry}`);
+  console.log(`[daemon] CWD: ${projectRoot}`);
+  console.log(`[daemon] Data dir: ${runtimeConfig.dataDir}`);
+
   daemonProcess = spawn(command, ["run", daemonEntry], {
     cwd: projectRoot,
     env: buildDaemonEnv(),
@@ -181,18 +302,25 @@ async function startDaemon() {
   runtimeState.daemonRunning = true;
   runtimeState.daemonReady = false;
   runtimeState.daemonPid = daemonProcess.pid ?? null;
+  console.log(`[daemon] Spawned with PID ${runtimeState.daemonPid}`);
 
   daemonProcess.stdout?.on("data", (chunk) => {
-    console.log(String(chunk));
+    console.log(`[daemon:out] ${String(chunk).trim()}`);
   });
   daemonProcess.stderr?.on("data", (chunk) => {
     const text = String(chunk).trim();
     if (text) {
       runtimeState.lastError = text;
-      console.error(text);
+      console.error(`[daemon:err] ${text}`);
     }
   });
+  daemonProcess.on("error", (err) => {
+    console.error(`[daemon] Spawn error: ${err.message}`);
+    runtimeState.lastError = `Failed to spawn daemon: ${err.message}`;
+    runtimeState.daemonRunning = false;
+  });
   daemonProcess.on("exit", (code, signal) => {
+    console.log(`[daemon] Exited with code=${code}, signal=${signal}`);
     runtimeState.daemonRunning = false;
     runtimeState.daemonReady = false;
     runtimeState.daemonPid = null;
@@ -205,8 +333,11 @@ async function startDaemon() {
 
   const ready = await waitForDaemonReady();
   if (ready) {
+    console.log("[daemon] Health check passed, daemon is ready.");
     daemonRestartAttempts = 0;
     clearRestartTimer();
+  } else {
+    console.error("[daemon] Health check timed out after 15s.");
   }
 }
 
@@ -214,9 +345,11 @@ async function restartDaemon() {
   if (daemonProcess && !daemonProcess.killed) {
     daemonProcess.kill();
   }
+  // If a daemon exists that this Electron process didn't spawn, force-kill it.
+  await killStaleOnPort();
   runtimeState.daemonRunning = false;
   runtimeState.daemonReady = false;
-  await startDaemon();
+  await startDaemon({ forceRestart: true });
   return getDaemonStatus();
 }
 
@@ -271,7 +404,16 @@ function registerZoomShortcuts(win) {
 ipcMain.handle("ai:chat", async (_event, messages) => {
   return runAiChat(messages);
 });
+function ensureLaunchToken() {
+  if (!runtimeState.launchToken || runtimeState.launchToken.length < 32) {
+    bootstrapRuntimeLayout();
+    runtimeState.launchToken = loadOrCreateLaunchToken();
+  }
+  return runtimeState.launchToken;
+}
+
 ipcMain.handle("daemon:get-status", async () => {
+  ensureLaunchToken();
   const ready = await checkDaemonHealth(runtimeState.launchToken);
   runtimeState.daemonReady = ready;
   if (!ready && runtimeState.daemonRunning && !runtimeState.lastError) {
@@ -283,8 +425,10 @@ ipcMain.handle("daemon:restart", async () => {
   return restartDaemon();
 });
 ipcMain.handle("daemon:get-runtime-config", () => {
+  ensureLaunchToken();
   return {
-    apiBase: `http://127.0.0.1:${daemonPort}`,
+    // In dev, use empty base so requests go through the Vite proxy (same origin)
+    apiBase: isDev ? "" : `http://127.0.0.1:${daemonPort}`,
     launchToken: runtimeState.launchToken
   };
 });
@@ -295,7 +439,8 @@ ipcMain.handle("daemon:open-runtime-folder", () => {
 app.whenReady().then(() => {
   app.isQuitting = false;
   Menu.setApplicationMenu(null);
-  void startDaemon();
+  // In dev, always force a fresh daemon so code/env changes apply immediately.
+  void startDaemon({ forceRestart: isDev });
   createWindow();
 
   app.on("activate", () => {

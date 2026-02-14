@@ -45,6 +45,8 @@ export function App() {
         persistOnboarding={state.persistOnboarding}
         completeOnboarding={state.completeOnboarding}
         saveGmailToken={state.saveGmailToken}
+        saveAiKey={state.saveAiKey}
+        checkAiKeyConfigured={state.checkAiKeyConfigured}
         getGmailOauthStart={state.getGmailOauthStart}
       />
     );
@@ -58,12 +60,6 @@ export function App() {
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
               OpenCorpo
             </div>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900">
-              Simple, safe self-editing operations
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Desktop-first AI operations for non-technical teams.
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={state.daemonStatus.ready ? "success" : "warning"}>
@@ -109,10 +105,9 @@ export function App() {
                 path="/"
                 element={
                   <ChatView
-                    messages={state.messages}
-                    pendingApprovals={state.pendingApprovals.length}
-                    sendMessage={state.sendMessage}
-                    isSending={state.isSending}
+                    apiBase={state.apiBase}
+                    launchToken={state.launchToken}
+                    daemonReady={state.daemonStatus.ready}
                   />
                 }
               />
@@ -137,11 +132,15 @@ export function App() {
                     diagnostics={state.diagnostics}
                     plugins={state.plugins}
                     gmailStatus={state.gmailStatus}
+                    onboarding={state.onboarding}
+                    persistOnboarding={state.persistOnboarding}
                     onRestartDaemon={state.restartDaemon}
                     onRunDiagnostics={state.runDiagnosticsNow}
                     onRunRepair={state.runRepair}
                     onGetOauthStart={state.getGmailOauthStart}
                     onSaveGmailToken={state.saveGmailToken}
+                    onSaveAiKey={state.saveAiKey}
+                    checkAiKeyConfigured={state.checkAiKeyConfigured}
                     onToggleAdvanced={setAdvancedAndPersist}
                     advancedMode={advancedMode}
                     apiBase={state.apiBase}

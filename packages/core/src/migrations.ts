@@ -10,6 +10,15 @@ export type MigrationResult = {
   currentVersion: string | null;
 };
 
+function tableExists(db: Database, table: string): boolean {
+  const row = db
+    .query(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?;`
+    )
+    .get(table) as { name?: string } | null;
+  return Boolean(row?.name);
+}
+
 function tableColumns(db: Database, table: string) {
   const rows = db
     .query(`PRAGMA table_info(${table});`)
@@ -179,6 +188,13 @@ export function runMigrations(db: Database): MigrationResult {
       applied_at TEXT NOT NULL
     );
   `);
+
+  // Ensure audit_log has hash columns before any migration that references them.
+  // Fixes existing DBs created before these columns were added.
+  if (tableExists(db, "audit_log")) {
+    ensureColumn(db, "audit_log", "prev_hash");
+    ensureColumn(db, "audit_log", "entry_hash");
+  }
 
   const rows = db
     .query(`SELECT version FROM schema_migrations ORDER BY id ASC;`)
