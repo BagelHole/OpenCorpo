@@ -1,0 +1,1 @@
+{"name":"opencorpo.list_jobs","version":"0.0.1","risk":"low","capabilities":["opencorpo.read"],"inputs":{"type":"object"},"outputs":{"type":"object","properties":{"jobs":{"type":"array"}}}}

@@ -427,11 +427,19 @@ Daemon only (debug mode):
 bun run dev:daemon
 ```
 
-Optional AI provider key (Electron bridge):
+### AI provider setup
+
+The agent uses a real LLM with tool calling. Configure your API key during onboarding or in Settings:
+
+- **OpenAI** – GPT-4o-mini (default)
+- **Anthropic** – Claude 3.5 Haiku
+- **Vercel AI** – BYOK gateway (any compatible model)
+
+Keys are stored locally in daemon secrets and never leave your machine. For headless/CLI use, you can also set:
 
 ```
-export AI_GATEWAY_API_KEY=your_key
-# or: export VERCEL_AI_API_KEY=your_key
+export OPENAI_API_KEY=sk-...
+# or ANTHROPIC_API_KEY / VERCEL_AI_API_KEY
 ```
 
 ## License

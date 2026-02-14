@@ -1,0 +1,1 @@
+{"name":"opencorpo.list_audit","version":"0.0.1","risk":"low","capabilities":["opencorpo.read"],"inputs":{"type":"object","properties":{"limit":{"type":"number"}}},"outputs":{"type":"object","properties":{"entries":{"type":"array"}}}}

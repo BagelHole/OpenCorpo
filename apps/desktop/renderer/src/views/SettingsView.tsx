@@ -33,16 +33,23 @@ type GmailStatus = {
   refreshConfigured: boolean;
 };
 
+type AiStatus = {
+  configured: boolean;
+  provider: string | null;
+};
+
 export function SettingsView({
   daemonStatus,
   diagnostics,
   plugins,
   gmailStatus,
+  aiStatus,
   onRestartDaemon,
   onRunDiagnostics,
   onRunRepair,
   onGetOauthStart,
   onSaveGmailToken,
+  onSaveAiConfig,
   onToggleAdvanced,
   advancedMode,
   apiBase
@@ -51,18 +58,36 @@ export function SettingsView({
   diagnostics: DiagnosticsReport | null;
   plugins: PluginInfo[];
   gmailStatus: GmailStatus;
+  aiStatus: AiStatus;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
   onRunRepair: () => Promise<void>;
   onGetOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   onSaveGmailToken: (token: string) => Promise<void>;
+  onSaveAiConfig: (provider: string, apiKey: string) => Promise<void>;
   onToggleAdvanced: (next: boolean) => void;
   advancedMode: boolean;
   apiBase: string;
 }) {
   const [tokenInput, setTokenInput] = useState("");
+  const [aiProvider, setAiProvider] = useState(aiStatus.provider ?? "openai");
+  const [aiKeyInput, setAiKeyInput] = useState("");
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const pluginFailures = useMemo(() => plugins.filter((item) => !item.loaded), [plugins]);
+
+  const saveAiConfig = async () => {
+    if (!aiKeyInput.trim()) {
+      setLocalMessage("Enter an API key.");
+      return;
+    }
+    try {
+      await onSaveAiConfig(aiProvider, aiKeyInput.trim());
+      setAiKeyInput("");
+      setLocalMessage("AI config saved.");
+    } catch (err) {
+      setLocalMessage(err instanceof Error ? err.message : "Failed to save.");
+    }
+  };
 
   const connectOAuth = async () => {
     const start = await onGetOauthStart();
@@ -108,6 +133,42 @@ export function SettingsView({
             <Button variant="secondary" onClick={() => void onRunRepair()}>
               Repair now
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border border-slate-200 shadow-sm">
+        <CardHeader>
+          <CardTitle>AI Provider</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-600">
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <span>Status</span>
+            <Badge tone={aiStatus.configured ? "success" : "warning"}>
+              {aiStatus.configured ? `Configured (${aiStatus.provider})` : "Not configured"}
+            </Badge>
+          </div>
+          <p className="text-xs text-slate-500">
+            Add your API key to enable the AI agent. Keys are stored locally.
+          </p>
+          <div className="flex gap-2">
+            <select
+              value={aiProvider}
+              onChange={(e) => setAiProvider(e.target.value)}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+            >
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="vercel">Vercel AI</option>
+            </select>
+            <input
+              type="password"
+              value={aiKeyInput}
+              onChange={(e) => setAiKeyInput(e.target.value)}
+              className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+              placeholder="API key"
+            />
+            <Button onClick={() => void saveAiConfig()}>Save</Button>
           </div>
         </CardContent>
       </Card>

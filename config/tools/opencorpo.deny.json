@@ -1,0 +1,1 @@
+{"name":"opencorpo.deny","version":"0.0.1","risk":"medium","capabilities":["opencorpo.approve"],"inputs":{"type":"object","properties":{"approvalId":{"type":"number"}},"required":["approvalId"]},"outputs":{"type":"object"}}

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 type OnboardingData = {
   completed: boolean;
-  aiProvider: "anthropic" | "openai" | "local";
+  aiProvider: "anthropic" | "openai" | "vercel";
   aiKey: string;
   gmailAccessToken: string;
 };
@@ -17,6 +17,8 @@ type Props = {
   completeOnboarding: () => void;
   saveGmailToken: (token: string) => Promise<void>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  saveAiConfig: (provider: string, apiKey: string) => Promise<void>;
+  daemonReady: boolean;
 };
 
 export function OnboardingWizard({
@@ -25,7 +27,9 @@ export function OnboardingWizard({
   persistOnboarding,
   completeOnboarding,
   saveGmailToken,
-  getGmailOauthStart
+  getGmailOauthStart,
+  saveAiConfig,
+  daemonReady
 }: Props) {
   const [step, setStep] = useState(0);
   const [tokenInput, setTokenInput] = useState(onboarding.gmailAccessToken ?? "");
@@ -46,8 +50,16 @@ export function OnboardingWizard({
     persistOnboarding({ ...onboarding, aiProvider: provider });
   };
 
-  const finish = () => {
+  const finish = async () => {
     setLocalError(null);
+    if (onboarding.aiKey.trim() && daemonReady) {
+      try {
+        await saveAiConfig(onboarding.aiProvider, onboarding.aiKey);
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : "Failed to save AI config.");
+        return;
+      }
+    }
     completeOnboarding();
   };
 
@@ -120,14 +132,14 @@ export function OnboardingWizard({
           {step === 1 && (
             <div className="space-y-4 text-sm">
               <p className="text-slate-600">
-                Pick your default AI provider. You can change this later in settings.
+                Pick your AI provider and add your API key. Keys are stored locally and never leave your machine.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
                 {(
                   [
-                    ["anthropic", "Anthropic"],
-                    ["openai", "OpenAI"],
-                    ["local", "Local / BYOK"]
+                    ["openai", "OpenAI (GPT-4)"],
+                    ["anthropic", "Anthropic (Claude)"],
+                    ["vercel", "Vercel AI (BYOK)"]
                   ] as const
                 ).map(([value, label]) => (
                   <button
@@ -142,6 +154,26 @@ export function OnboardingWizard({
                     {label}
                   </button>
                 ))}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase tracking-[0.15em] text-slate-500">
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={onboarding.aiKey}
+                  onChange={(e) =>
+                    persistOnboarding({ ...onboarding, aiKey: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  placeholder={
+                    onboarding.aiProvider === "openai"
+                      ? "sk-..."
+                      : onboarding.aiProvider === "anthropic"
+                        ? "sk-ant-..."
+                        : "Your API key"
+                  }
+                />
               </div>
             </div>
           )}
@@ -206,7 +238,9 @@ export function OnboardingWizard({
                 {step === 2 ? "Continue without Gmail" : "Continue"}
               </Button>
             ) : (
-              <Button onClick={() => void finish()}>Enter OpenCorpo</Button>
+              <Button onClick={() => void finish()}>
+                Enter OpenCorpo
+              </Button>
             )}
           </div>
         </CardContent>

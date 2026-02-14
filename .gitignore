@@ -13,3 +13,6 @@ dist/
 build/
 out/
 *.tsbuildinfo
+
+# Runtime data
+data/

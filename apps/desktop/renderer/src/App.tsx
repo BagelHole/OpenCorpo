@@ -46,6 +46,8 @@ export function App() {
         completeOnboarding={state.completeOnboarding}
         saveGmailToken={state.saveGmailToken}
         getGmailOauthStart={state.getGmailOauthStart}
+        saveAiConfig={state.saveAiConfig}
+        daemonReady={state.daemonStatus.ready}
       />
     );
   }
@@ -137,11 +139,13 @@ export function App() {
                     diagnostics={state.diagnostics}
                     plugins={state.plugins}
                     gmailStatus={state.gmailStatus}
+                    aiStatus={state.aiStatus}
                     onRestartDaemon={state.restartDaemon}
                     onRunDiagnostics={state.runDiagnosticsNow}
                     onRunRepair={state.runRepair}
                     onGetOauthStart={state.getGmailOauthStart}
                     onSaveGmailToken={state.saveGmailToken}
+                    onSaveAiConfig={state.saveAiConfig}
                     onToggleAdvanced={setAdvancedAndPersist}
                     advancedMode={advancedMode}
                     apiBase={state.apiBase}

@@ -25,6 +25,7 @@ import { buildToolRegistry, validateToolInput } from "./tool-registry";
 import { seedJobsFromConfig } from "./job-config";
 import { addMessage, createSession, getSession, listMessages, listSessions } from "./chat";
 import { runAgent } from "./agent";
+import { createInternalToolHandlers } from "./tools-internal";
 import { pluginsRoot, workspaceRoot } from "./paths";
 import {
   createCapabilityGrant,
@@ -47,6 +48,7 @@ import {
 } from "./code-change-proposals";
 import { runDiagnostics, listDiagnosticsRuns } from "./diagnostics";
 import { getSecretRef, getSecretValue, listSecrets, setSecretRef } from "./secrets";
+import { getAiConfigStatus, setAiConfig } from "./services/ai-config";
 
 const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
@@ -73,7 +75,8 @@ let plugins = pluginLoadResults.map((entry) => ({
 let pluginTools = pluginLoadResults
   .filter((entry) => entry.loaded && entry.definition)
   .flatMap((entry) => entry.definition?.tools ?? []);
-let toolRegistry = buildToolRegistry(toolsConfig, pluginTools);
+const internalTools = createInternalToolHandlers(db);
+let toolRegistry = buildToolRegistry(toolsConfig, [...pluginTools, ...internalTools]);
 seedJobsFromConfig(db, controlPlane.root);
 attachEventBroadcast(db);
 
@@ -103,7 +106,7 @@ async function rebuildRuntimeState() {
   pluginTools = pluginLoadResults
     .filter((entry) => entry.loaded && entry.definition)
     .flatMap((entry) => entry.definition?.tools ?? []);
-  toolRegistry = buildToolRegistry(toolsConfig, pluginTools);
+  toolRegistry = buildToolRegistry(toolsConfig, [...pluginTools, ...createInternalToolHandlers(db)]);
   seedJobsFromConfig(db, controlPlane.root);
 }
 
@@ -316,9 +319,10 @@ app.post("/chat/messages", async ({ body }) => {
     return { ok: true, messageId };
   }
 
-  const reply = await runAgent(content, {
+  const reply = await runAgent(sessionId, content, {
     db,
-    tools: toolRegistry.definitions,
+    toolRegistry,
+    policy,
     plugins,
     controlPlaneRoot: controlPlane.root,
     workspaceRoot
@@ -782,6 +786,35 @@ app.get("/secrets", ({ query }) => {
     ok: true,
     items: listSecrets(db, limit)
   };
+});
+
+app.get("/settings/ai", () => {
+  const status = getAiConfigStatus(db);
+  return {
+    ok: true,
+    configured: status.configured,
+    provider: status.provider
+  };
+});
+
+app.post("/settings/ai", ({ body }) => {
+  const payload = asObject(body);
+  const provider = payload.provider as string;
+  const apiKey = typeof payload.apiKey === "string" ? payload.apiKey : "";
+  const validProviders = ["openai", "anthropic", "vercel"];
+  if (!validProviders.includes(provider) || !apiKey.trim()) {
+    return { ok: false, error: "provider_and_apiKey_required" };
+  }
+  setAiConfig(db, {
+    provider: provider as "openai" | "anthropic" | "vercel",
+    apiKey: apiKey.trim()
+  });
+  writeAudit(db, {
+    actor: "user",
+    action: "ai_config_updated",
+    metadata: { provider }
+  });
+  return { ok: true };
 });
 app.get("/stream", ({ request, set }) => {
   set.headers["content-type"] = "text/event-stream";

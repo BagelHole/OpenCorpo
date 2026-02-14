@@ -1,0 +1,1 @@
+{"name":"opencorpo.run_job","version":"0.0.1","risk":"low","capabilities":["opencorpo.jobs"],"inputs":{"type":"object","properties":{"jobId":{"type":"number"}},"required":["jobId"]},"outputs":{"type":"object","properties":{"jobRunId":{"type":"number"}}}}

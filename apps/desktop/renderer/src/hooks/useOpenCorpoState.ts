@@ -68,7 +68,7 @@ type DiagnosticsReport = {
 
 type OnboardingData = {
   completed: boolean;
-  aiProvider: "anthropic" | "openai" | "local";
+  aiProvider: "anthropic" | "openai" | "vercel";
   aiKey: string;
   gmailAccessToken: string;
 };
@@ -90,7 +90,7 @@ function readOnboardingState(): OnboardingData {
     return {
       completed: Boolean(parsed.completed),
       aiProvider:
-        parsed.aiProvider === "openai" || parsed.aiProvider === "local"
+        parsed.aiProvider === "openai" || parsed.aiProvider === "vercel"
           ? parsed.aiProvider
           : "anthropic",
       aiKey: parsed.aiKey ?? "",
@@ -155,6 +155,13 @@ export function useOpenCorpoState() {
     tokenSource: null,
     refreshConfigured: false
   });
+  const [aiStatus, setAiStatus] = useState<{
+    configured: boolean;
+    provider: string | null;
+  }>({
+    configured: false,
+    provider: null
+  });
 
   const apiBaseRef = useRef(apiBase);
   const launchTokenRef = useRef(launchToken);
@@ -203,7 +210,7 @@ export function useOpenCorpoState() {
   const refreshData = useCallback(async () => {
     if (!launchTokenRef.current || !daemonStatus.ready) return;
     try {
-      const [approvalsData, jobsData, runsData, auditData, pluginData, toolsData, gmailData] =
+      const [approvalsData, jobsData, runsData, auditData, pluginData, toolsData, gmailData, aiData] =
         await Promise.all([
           requestJson("/approvals"),
           requestJson("/jobs"),
@@ -211,7 +218,8 @@ export function useOpenCorpoState() {
           requestJson("/audit?limit=30"),
           requestJson("/plugins"),
           requestJson("/tools"),
-          requestJson("/connectors/gmail/status")
+          requestJson("/connectors/gmail/status"),
+          requestJson("/settings/ai").catch(() => ({ configured: false, provider: null }))
         ]);
       setApprovals(approvalsData.items ?? []);
       setJobs(jobsData.items ?? []);
@@ -223,6 +231,10 @@ export function useOpenCorpoState() {
         connected: Boolean(gmailData.connected),
         tokenSource: gmailData.tokenSource ?? null,
         refreshConfigured: Boolean(gmailData.refreshConfigured)
+      });
+      setAiStatus({
+        configured: Boolean(aiData?.configured),
+        provider: aiData?.provider ?? null
       });
       setApiError(null);
     } catch (error) {
@@ -362,6 +374,16 @@ export function useOpenCorpoState() {
     return requestJson("/connectors/gmail/oauth/start");
   }, [requestJson]);
 
+  const saveAiConfig = useCallback(
+    async (provider: string, apiKey: string) => {
+      await requestJson("/settings/ai", {
+        method: "POST",
+        body: JSON.stringify({ provider, apiKey })
+      });
+    },
+    [requestJson]
+  );
+
   useEffect(() => {
     let mounted = true;
     async function init() {
@@ -422,6 +444,7 @@ export function useOpenCorpoState() {
     onboardingReady,
     pendingApprovals,
     gmailStatus,
+    aiStatus,
     persistOnboarding,
     completeOnboarding,
     sendMessage,
@@ -433,6 +456,7 @@ export function useOpenCorpoState() {
     toggleJob,
     saveGmailToken,
     getGmailOauthStart,
+    saveAiConfig,
     refreshData
   };
 }
