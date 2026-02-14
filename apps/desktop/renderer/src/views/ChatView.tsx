@@ -26,7 +26,6 @@ export function ChatView({ apiBase, launchToken, daemonReady }: ChatViewProps) {
   );
 
   const chatApiUrl = useMemo(() => {
-    // When apiBase is empty (dev), use relative path so Vite proxy forwards to daemon
     if (!apiBase) return "/chat/stream";
     return `${apiBase.replace(/\/$/, "")}/chat/stream`;
   }, [apiBase]);
@@ -35,7 +34,7 @@ export function ChatView({ apiBase, launchToken, daemonReady }: ChatViewProps) {
     () =>
       new DefaultChatTransport({
         api: chatApiUrl,
-        fetch: customFetch
+        fetch: customFetch,
       }),
     [chatApiUrl, customFetch]
   );
@@ -50,27 +49,26 @@ export function ChatView({ apiBase, launchToken, daemonReady }: ChatViewProps) {
     (status === "ready" || status === "error");
 
   return (
-    <div className="flex h-full flex-col">
-      <Card className="flex min-h-0 flex-1 flex-col border border-slate-200 shadow-sm">
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 pt-5">
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <div className="flex h-full min-h-[60vh] flex-col">
+      <Card className="flex min-h-0 flex-1 flex-col">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] p-4">
             {messages.length === 0 && (
-              <div className="mx-auto max-w-[90%] rounded-2xl border border-dashed border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">
-                Welcome to OpenCorpo. Ask me what needs your attention and I will do the heavy
-                lifting.
+              <div className="mx-auto max-w-[90%] rounded-lg border border-dashed border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] px-4 py-3 text-sm text-[var(--oc-ink-muted)]">
+                Welcome to OpenCorpo. Ask me what needs your attention and I will do the heavy lifting.
               </div>
             )}
             {messages.map((message, index) => (
               <div
                 key={message.id ?? index}
                 className={cn(
-                  "max-w-2xl whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm shadow-sm",
+                  "max-w-2xl whitespace-pre-wrap rounded-lg border px-4 py-3 text-sm",
                   message.role === "assistant" &&
-                    "border-slate-200 bg-white text-slate-800",
+                    "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)]",
                   message.role === "user" &&
-                    "ml-auto border-slate-900 bg-slate-900 text-white",
+                    "ml-auto border-[var(--oc-accent)] bg-[var(--oc-accent)] text-[var(--oc-bg)]",
                   message.role === "system" &&
-                    "mx-auto max-w-[90%] border-dashed border-slate-200 bg-slate-100 text-slate-600"
+                    "mx-auto max-w-[90%] border-dashed border-[var(--oc-border)] bg-[var(--oc-bg)] text-[var(--oc-ink-muted)]"
                 )}
               >
                 {message.parts?.map((part, i) =>
@@ -81,14 +79,14 @@ export function ChatView({ apiBase, launchToken, daemonReady }: ChatViewProps) {
               </div>
             ))}
             {isStreaming && (
-              <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+              <div className="max-w-2xl rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] px-4 py-3 text-sm text-[var(--oc-ink-muted)] oc-pulse">
                 Working on it...
               </div>
             )}
           </div>
 
           {error && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+            <div className="rounded-lg border border-[var(--oc-warning)]/50 bg-[var(--oc-warning-bg)] px-4 py-2 text-sm text-[var(--oc-warning)]">
               {error.message}
             </div>
           )}
@@ -117,21 +115,21 @@ export function ChatView({ apiBase, launchToken, daemonReady }: ChatViewProps) {
                   }
                 }}
                 rows={3}
-                className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                className="w-full resize-none rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-4 py-3 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)] disabled:opacity-50"
                 placeholder="Tell OpenCorpo what outcome you want..."
                 disabled={!canSend}
               />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-xs text-[var(--oc-ink-muted)]">
                   {canSend ? "Press Enter to send." : "Connecting to daemon..."}
                 </span>
                 <div className="flex gap-2">
                   {isStreaming && (
-                    <Button type="button" variant="secondary" onClick={() => stop()}>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => stop()}>
                       Stop
                     </Button>
                   )}
-                  <Button type="submit" disabled={!canSend}>
+                  <Button type="submit" size="sm" disabled={!canSend}>
                     {isStreaming ? "Working..." : "Send"}
                   </Button>
                 </div>

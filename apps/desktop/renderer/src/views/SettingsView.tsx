@@ -47,6 +47,7 @@ export function SettingsView({
   gmailStatus,
   onboarding,
   persistOnboarding,
+  saveAiProvider,
   onRestartDaemon,
   onRunDiagnostics,
   onRunRepair,
@@ -56,7 +57,7 @@ export function SettingsView({
   checkAiKeyConfigured,
   onToggleAdvanced,
   advancedMode,
-  apiBase
+  apiBase,
 }: {
   daemonStatus: DaemonStatus;
   diagnostics: DiagnosticsReport | null;
@@ -64,6 +65,7 @@ export function SettingsView({
   gmailStatus: GmailStatus;
   onboarding: OnboardingData;
   persistOnboarding: (next: OnboardingData) => void;
+  saveAiProvider: (provider: string) => Promise<void>;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
   onRunRepair: () => Promise<void>;
@@ -80,11 +82,20 @@ export function SettingsView({
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const pluginFailures = useMemo(() => plugins.filter((item) => !item.loaded), [plugins]);
+  const pluginFailures = useMemo(() => plugins.filter((p) => !p.loaded), [plugins]);
 
   useEffect(() => {
     void checkAiKeyConfigured().then(setAiKeyConfigured);
   }, [checkAiKeyConfigured]);
+
+  const handleProviderChange = async (provider: OnboardingData["aiProvider"]) => {
+    persistOnboarding({ ...onboarding, aiProvider: provider });
+    try {
+      await saveAiProvider(provider);
+    } catch (e) {
+      setAiKeyMessage(e instanceof Error ? e.message : "Failed to update provider");
+    }
+  };
 
   const saveAiKey = async () => {
     if (!aiKeyInput.trim()) {
@@ -122,41 +133,43 @@ export function SettingsView({
   };
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <Card className="border border-slate-200 shadow-sm">
+    <div className="grid gap-4 sm:gap-5 xl:grid-cols-2">
+      <Card>
         <CardHeader>
           <CardTitle>System Health</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <HealthRow label="Daemon process" ok={daemonStatus.running} value={daemonStatus.running ? "Running" : "Stopped"} />
-          <HealthRow label="Daemon readiness" ok={daemonStatus.ready} value={daemonStatus.ready ? "Healthy" : "Not ready"} />
-          <HealthRow label="API endpoint" ok={daemonStatus.ready} value={apiBase} />
-          <HealthRow label="Secure launch token" ok={daemonStatus.hasToken} value={daemonStatus.hasToken ? "Configured" : "Missing"} />
+          <HealthRow label="Daemon" ok={daemonStatus.running} value={daemonStatus.running ? "Running" : "Stopped"} />
+          <HealthRow label="Ready" ok={daemonStatus.ready} value={daemonStatus.ready ? "Yes" : "No"} />
+          <HealthRow label="API" ok={daemonStatus.ready} value={apiBase || "—"} />
+          <HealthRow label="Token" ok={daemonStatus.hasToken} value={daemonStatus.hasToken ? "Set" : "Missing"} />
           {daemonStatus.lastError && (
-            <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            <div className="rounded-lg bg-[var(--oc-danger-bg)] px-3 py-2 text-xs text-[var(--oc-danger)]">
               {daemonStatus.lastError}
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void onRestartDaemon()}>Restart daemon</Button>
-            <Button variant="secondary" onClick={() => void onRunDiagnostics()}>
-              Run diagnostics
+            <Button size="sm" onClick={() => void onRestartDaemon()}>
+              Restart daemon
             </Button>
-            <Button variant="secondary" onClick={() => void onRunRepair()}>
-              Repair now
+            <Button size="sm" variant="secondary" onClick={() => void onRunDiagnostics()}>
+              Diagnostics
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void onRunRepair()}>
+              Repair
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="border border-slate-200 shadow-sm">
+      <Card>
         <CardHeader>
           <CardTitle>AI Provider</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-600">
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-            <span>Provider</span>
-            <span className="text-xs text-slate-500">
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
+            <span className="text-[var(--oc-ink-muted)]">Provider</span>
+            <span className="text-xs">
               {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "Local / BYOK"}
             </span>
           </div>
@@ -164,19 +177,19 @@ export function SettingsView({
             {(["anthropic", "openai", "local"] as const).map((value) => (
               <button
                 key={value}
-                onClick={() => persistOnboarding({ ...onboarding, aiProvider: value })}
-                className={`rounded-xl border px-3 py-1.5 text-sm transition ${
+                onClick={() => void handleProviderChange(value)}
+                className={`rounded-lg border px-3 py-1.5 text-sm transition ${
                   onboarding.aiProvider === value
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                    ? "border-[var(--oc-accent)] bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                    : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)] hover:border-[var(--oc-border-strong)]"
                 }`}
               >
                 {value === "anthropic" ? "Anthropic" : value === "openai" ? "OpenAI" : "Local"}
               </button>
             ))}
           </div>
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-            <span>API key</span>
+          <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
+            <span className="text-[var(--oc-ink-muted)]">API key</span>
             <Badge tone={aiKeyConfigured ? "success" : "warning"}>
               {aiKeyConfigured ? "Configured" : "Not configured"}
             </Badge>
@@ -186,63 +199,66 @@ export function SettingsView({
               type="password"
               value={aiKeyInput}
               onChange={(e) => setAiKeyInput(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+              className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
               placeholder="Paste API key"
             />
-            <Button onClick={() => void saveAiKey()}>Save API key</Button>
+            <Button size="sm" onClick={() => void saveAiKey()}>
+              Save API key
+            </Button>
           </div>
           {aiKeyMessage && (
-            <div className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
               {aiKeyMessage}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="border border-slate-200 shadow-sm">
+      <Card>
         <CardHeader>
-          <CardTitle>Connector Setup</CardTitle>
+          <CardTitle>Gmail</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-600">
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-            <span>Gmail</span>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
+            <span className="text-[var(--oc-ink-muted)]">Status</span>
             <Badge tone={gmailStatus.connected ? "success" : "warning"}>
               {gmailStatus.connected ? "Connected" : "Not connected"}
             </Badge>
           </div>
-          <div className="text-xs text-slate-500">
-            Source: {gmailStatus.tokenSource ?? "none"} • Refresh token:{" "}
-            {gmailStatus.refreshConfigured ? "yes" : "no"}
+          <div className="text-xs text-[var(--oc-ink-muted)]">
+            Source: {gmailStatus.tokenSource ?? "none"} • Refresh: {gmailStatus.refreshConfigured ? "yes" : "no"}
           </div>
           <div className="space-y-2">
             <input
               value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+              onChange={(e) => setTokenInput(e.target.value)}
+              className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
               placeholder="Paste Gmail access token"
             />
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void saveToken()}>Save token</Button>
-              <Button variant="secondary" onClick={() => void connectOAuth()}>
+              <Button size="sm" onClick={() => void saveToken()}>
+                Save token
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void connectOAuth()}>
                 Connect via OAuth
               </Button>
             </div>
           </div>
           {localMessage && (
-            <div className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
               {localMessage}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="border border-slate-200 shadow-sm xl:col-span-2">
+      <Card className="xl:col-span-2">
         <CardHeader>
           <CardTitle>Diagnostics</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {!diagnostics && (
-            <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            <div className="rounded-lg bg-[var(--oc-bg)] px-3 py-2 text-sm text-[var(--oc-ink-muted)]">
               Run diagnostics to generate a report.
             </div>
           )}
@@ -252,34 +268,32 @@ export function SettingsView({
                 <Badge tone={diagnostics.status === "ok" ? "success" : "warning"}>
                   {diagnostics.status === "ok" ? "Healthy" : "Needs attention"}
                 </Badge>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-[var(--oc-ink-muted)]">
                   {new Date(diagnostics.generatedAt).toLocaleString()}
                 </span>
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {diagnostics.checks.map((check) => (
                   <div
                     key={check.id}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                    className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] px-3 py-2"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold text-slate-800">{check.label}</div>
-                      <Badge tone={check.ok ? "success" : "warning"}>
-                        {check.ok ? "OK" : "Warn"}
-                      </Badge>
+                      <div className="text-sm font-medium text-[var(--oc-ink)]">{check.label}</div>
+                      <Badge tone={check.ok ? "success" : "warning"}>{check.ok ? "OK" : "Warn"}</Badge>
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">{check.detail}</div>
+                    <div className="mt-1 text-xs text-[var(--oc-ink-muted)]">{check.detail}</div>
                   </div>
                 ))}
               </div>
               {diagnostics.recommendations.length > 0 && (
-                <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-slate-400">
+                <div className="rounded-lg bg-[var(--oc-bg)] px-3 py-3 text-sm text-[var(--oc-ink-muted)]">
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider">
                     Recommendations
                   </div>
                   <ul className="space-y-1">
                     {diagnostics.recommendations.map((item) => (
-                      <li key={item}>- {item}</li>
+                      <li key={item}>• {item}</li>
                     ))}
                   </ul>
                 </div>
@@ -289,20 +303,20 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card className="border border-slate-200 shadow-sm xl:col-span-2">
+      <Card className="xl:col-span-2">
         <CardHeader>
           <CardTitle>Advanced Mode</CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <div className="text-sm text-slate-600">
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-[var(--oc-ink-muted)]">
             Show technical surfaces like Audit and low-level metadata.
           </div>
           <button
             onClick={() => onToggleAdvanced(!advancedMode)}
-            className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
               advancedMode
-                ? "bg-slate-900 text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                ? "bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                : "bg-[var(--oc-border)] text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border-strong)]"
             }`}
           >
             {advancedMode ? "Enabled" : "Disabled"}
@@ -311,14 +325,14 @@ export function SettingsView({
       </Card>
 
       {pluginFailures.length > 0 && (
-        <Card className="border border-amber-200 bg-amber-50 shadow-sm xl:col-span-2">
+        <Card className="border-[var(--oc-warning)]/50 bg-[var(--oc-warning-bg)] xl:col-span-2">
           <CardHeader>
-            <CardTitle className="text-amber-800">Plugin issues detected</CardTitle>
+            <CardTitle className="text-[var(--oc-warning)]">Plugin issues</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-amber-800">
+          <CardContent className="space-y-1 text-sm text-[var(--oc-warning)]">
             {pluginFailures.map((plugin) => (
               <div key={plugin.name}>
-                - {plugin.name}: {plugin.error || "failed to load"}
+                • {plugin.name}: {plugin.error || "failed to load"}
               </div>
             ))}
           </CardContent>
@@ -331,18 +345,18 @@ export function SettingsView({
 function HealthRow({
   label,
   ok,
-  value
+  value,
 }: {
   label: string;
   ok: boolean;
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-      <div className="text-slate-700">{label}</div>
+    <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
+      <div className="text-[var(--oc-ink-muted)]">{label}</div>
       <div className="flex items-center gap-2">
         <Badge tone={ok ? "success" : "warning"}>{ok ? "OK" : "Check"}</Badge>
-        <span className="text-xs text-slate-500">{value}</span>
+        <span className="text-xs text-[var(--oc-ink-muted)]">{value}</span>
       </div>
     </div>
   );
