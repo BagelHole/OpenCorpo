@@ -26,8 +26,10 @@ export default defineConfig({
       "/events": "http://127.0.0.1:3555",
       "/auth": "http://127.0.0.1:3555",
       "/control-plane": "http://127.0.0.1:3555",
-      "/code-changes": "http://127.0.0.1:3555",
-      "/secrets": "http://127.0.0.1:3555"
+      "/code": "http://127.0.0.1:3555",
+      "/secrets": "http://127.0.0.1:3555",
+      "/oauth": "http://127.0.0.1:3555",
+      "/stream": "http://127.0.0.1:3555"
     }
   },
   resolve: {
