@@ -1,7 +1,13 @@
 import { Elysia } from "elysia";
 import { TextEncoder } from "node:util";
 import { ensureSchema, openDb } from "./db";
-import { getAuditById, listAudit, listAuditFiltered, writeAudit } from "./audit";
+import {
+  getAuditById,
+  listAudit,
+  listAuditFiltered,
+  repairAuditIntegrity,
+  writeAudit
+} from "./audit";
 import { getAuthState, requireAuth } from "./auth";
 import { loadControlPlane } from "./config";
 import { createApproval, getApprovalById, listApprovals, updateApprovalStatus } from "./approvals";
@@ -23,7 +29,15 @@ import { listApprovedApprovals, markApprovalExecuted, markApprovalFailed } from 
 import { attachEventBroadcast, registerClient, unregisterClient } from "./stream";
 import { buildToolRegistry, validateToolInput } from "./tool-registry";
 import { seedJobsFromConfig } from "./job-config";
-import { addMessage, createSession, getSession, listMessages, listSessions } from "./chat";
+import {
+  addMessage,
+  createSession,
+  deleteSession,
+  getSession,
+  listMessages,
+  listSessions,
+  updateSession
+} from "./chat";
 import { runAgent } from "./agent";
 import { runAgentWithLLM, streamAgentWithLLM } from "./agent-llm";
 import { pluginsRoot, workspaceRoot } from "./paths";
@@ -52,6 +66,7 @@ import { getSecretRef, getSecretValue, listSecrets, setSecretRef } from "./secre
 const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
 const migrations = ensureSchema(db);
+const auditRepair = repairAuditIntegrity(db);
 const existingGmailAccessToken = getSecretValue(db, "gmail.access_token");
 if (existingGmailAccessToken) {
   process.env.OPENCORPO_GMAIL_ACCESS_TOKEN = existingGmailAccessToken;
@@ -321,9 +336,48 @@ app.post("/chat/sessions", ({ body }) => {
   const payload =
     typeof body === "object" && body ? (body as Record<string, unknown>) : {};
   const title = payload.title ? String(payload.title) : undefined;
-  const id = createSession(db, title);
+  const metadata =
+    payload.metadata && typeof payload.metadata === "object"
+      ? (payload.metadata as Record<string, unknown>)
+      : undefined;
+  const id = createSession(db, title, metadata);
   writeEvent(db, { type: "chat.session.created", data: { id } });
   return { ok: true, id };
+});
+app.post("/chat/sessions/:id", ({ params, body }) => {
+  const id = Number(params.id);
+  if (!Number.isFinite(id)) return { ok: false, error: "invalid session id" };
+  const payload = asObject(body);
+  const title =
+    payload.title === undefined ? undefined : payload.title === null ? null : String(payload.title);
+  const metadata =
+    payload.metadata === undefined
+      ? undefined
+      : payload.metadata === null
+        ? null
+        : typeof payload.metadata === "object"
+          ? (payload.metadata as Record<string, unknown>)
+          : undefined;
+  const session = updateSession(db, id, { title, metadata });
+  if (!session) return { ok: false, error: "not_found" };
+  writeEvent(db, { type: "chat.session.updated", data: { id } });
+  return { ok: true, item: session };
+});
+app.post("/chat/sessions/:id/delete", ({ params }) => {
+  const id = Number(params.id);
+  if (!Number.isFinite(id)) return { ok: false, error: "invalid session id" };
+  const ok = deleteSession(db, id);
+  if (!ok) return { ok: false, error: "not_found" };
+  writeEvent(db, { type: "chat.session.deleted", data: { id } });
+  return { ok: true };
+});
+app.delete("/chat/sessions/:id", ({ params }) => {
+  const id = Number(params.id);
+  if (!Number.isFinite(id)) return { ok: false, error: "invalid session id" };
+  const ok = deleteSession(db, id);
+  if (!ok) return { ok: false, error: "not_found" };
+  writeEvent(db, { type: "chat.session.deleted", data: { id } });
+  return { ok: true };
 });
 app.get("/chat/messages", ({ query }) => {
   const sessionId = query?.sessionId ? Number(query.sessionId) : NaN;
@@ -339,6 +393,8 @@ app.post("/chat/messages", async ({ body }) => {
   const skipAgent = payload.skipAgent === true;
   if (!Number.isFinite(sessionId)) return { ok: false, error: "invalid session id" };
   if (!content.trim()) return { ok: false, error: "empty_message" };
+  const session = getSession(db, sessionId);
+  if (!session) return { ok: false, error: "session_not_found" };
 
   const messageId = addMessage(db, sessionId, role, content);
   writeEvent(db, { type: "chat.message.created", data: { id: messageId } });
@@ -362,7 +418,22 @@ app.post("/chat/messages", async ({ body }) => {
     content: m.content
   }));
 
-  let reply = await runAgentWithLLM(messages, agentContext);
+  const modelOverride =
+    payload.model && typeof payload.model === "string"
+      ? payload.model
+      : typeof session.metadata?.model === "string"
+        ? session.metadata.model
+        : undefined;
+  const providerOverride =
+    payload.provider && typeof payload.provider === "string"
+      ? payload.provider
+      : typeof session.metadata?.provider === "string"
+        ? session.metadata.provider
+        : undefined;
+  let reply = await runAgentWithLLM(messages, agentContext, {
+    model: modelOverride,
+    provider: providerOverride
+  });
   if (!reply) {
     reply = await runAgent(content, agentContext);
   }
@@ -397,7 +468,24 @@ app.post("/chat/stream", async ({ body }) => {
     handlerNames: Array.from(toolRegistry.handlers.keys())
   };
 
-  const result = await streamAgentWithLLM(messages, agentContext);
+  const sessionId = Number(payload.sessionId);
+  const session = Number.isFinite(sessionId) ? getSession(db, sessionId) : null;
+  const modelOverride =
+    payload.model && typeof payload.model === "string"
+      ? payload.model
+      : typeof session?.metadata?.model === "string"
+        ? session.metadata.model
+        : undefined;
+  const providerOverride =
+    payload.provider && typeof payload.provider === "string"
+      ? payload.provider
+      : typeof session?.metadata?.provider === "string"
+        ? session.metadata.provider
+        : undefined;
+  const result = await streamAgentWithLLM(messages, agentContext, {
+    model: modelOverride,
+    provider: providerOverride
+  });
   if (!result.ok) {
     return new Response(JSON.stringify({ ok: false, error: result.error }), {
       status: 400,
@@ -550,6 +638,7 @@ app.get("/diagnostics/runs", ({ query }) => {
 });
 
 app.post("/diagnostics/repair", async () => {
+  const audit = repairAuditIntegrity(db);
   await rebuildRuntimeState();
   writeAudit(db, {
     actor: "system",
@@ -557,7 +646,11 @@ app.post("/diagnostics/repair", async () => {
   });
   return {
     ok: true,
-    repaired: ["runtime_reloaded", "jobs_seeded"]
+    repaired: [
+      "runtime_reloaded",
+      "jobs_seeded",
+      ...(audit.repaired > 0 ? [`audit_rehashed:${audit.repaired}`] : [])
+    ]
   };
 });
 
@@ -877,6 +970,111 @@ app.get("/secrets/ai-key/status", () => {
     null;
   return { ok: true, configured: hasKey, provider };
 });
+
+app.get("/profile", () => {
+  const raw = getSecretValue(db, "user.profile");
+  if (!raw) {
+    return {
+      ok: true,
+      profile: {
+        name: "",
+        role: "",
+        jobTitle: "",
+        about: ""
+      }
+    };
+  }
+  try {
+    const profile = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      ok: true,
+      profile: {
+        name: typeof profile.name === "string" ? profile.name : "",
+        role: typeof profile.role === "string" ? profile.role : "",
+        jobTitle: typeof profile.jobTitle === "string" ? profile.jobTitle : "",
+        about: typeof profile.about === "string" ? profile.about : ""
+      }
+    };
+  } catch {
+    return {
+      ok: true,
+      profile: {
+        name: "",
+        role: "",
+        jobTitle: "",
+        about: ""
+      }
+    };
+  }
+});
+
+app.post("/profile", ({ body }) => {
+  const payload = asObject(body);
+  const profile = {
+    name: typeof payload.name === "string" ? payload.name.trim() : "",
+    role: typeof payload.role === "string" ? payload.role.trim() : "",
+    jobTitle: typeof payload.jobTitle === "string" ? payload.jobTitle.trim() : "",
+    about: typeof payload.about === "string" ? payload.about.trim() : ""
+  };
+  setSecretRef(db, {
+    name: "user.profile",
+    value: JSON.stringify(profile),
+    provider: "local_file"
+  });
+  writeAudit(db, { actor: "user", action: "user_profile_saved" });
+  return { ok: true, profile };
+});
+
+app.get("/secrets/ai-model-defaults", () => {
+  const raw = getSecretValue(db, "ai.model_defaults");
+  if (!raw) {
+    return {
+      ok: true,
+      defaults: {
+        anthropic: "",
+        openai: "",
+        local: ""
+      }
+    };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      ok: true,
+      defaults: {
+        anthropic: typeof parsed.anthropic === "string" ? parsed.anthropic : "",
+        openai: typeof parsed.openai === "string" ? parsed.openai : "",
+        local: typeof parsed.local === "string" ? parsed.local : ""
+      }
+    };
+  } catch {
+    return {
+      ok: true,
+      defaults: {
+        anthropic: "",
+        openai: "",
+        local: ""
+      }
+    };
+  }
+});
+
+app.post("/secrets/ai-model-defaults", ({ body }) => {
+  const payload = asObject(body);
+  const defaults = {
+    anthropic: typeof payload.anthropic === "string" ? payload.anthropic.trim() : "",
+    openai: typeof payload.openai === "string" ? payload.openai.trim() : "",
+    local: typeof payload.local === "string" ? payload.local.trim() : ""
+  };
+  setSecretRef(db, {
+    name: "ai.model_defaults",
+    value: JSON.stringify(defaults),
+    provider: "local_file"
+  });
+  writeAudit(db, { actor: "user", action: "ai_model_defaults_saved" });
+  return { ok: true, defaults };
+});
+
 app.post("/secrets/ai-key", ({ body }) => {
   const payload = asObject(body);
   const value =
@@ -1153,7 +1351,8 @@ writeAudit(db, {
   metadata: {
     port: Number(process.env.OPENCORPO_PORT || 3555),
     configRoot: controlPlane.root,
-    migrationVersion: migrations.currentVersion
+    migrationVersion: migrations.currentVersion,
+    auditRepaired: auditRepair.repaired
   }
 });
 

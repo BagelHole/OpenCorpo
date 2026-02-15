@@ -52,6 +52,10 @@ export class OpenCorpoApi {
     });
   }
 
+  async delete<T>(path: string) {
+    return this.request<T>(path, { method: "DELETE" });
+  }
+
   // Auth
   async createAuthSession(actor = "desktop", ttlSeconds = 28800) {
     return this.post<{ ok: boolean; token: string; expiresAt: string }>("/auth/session", {
@@ -62,23 +66,65 @@ export class OpenCorpoApi {
 
   // Chat
   async listSessions() {
-    return this.get<{ items: Array<{ id: number; title?: string }> }>("/chat/sessions");
+    return this.get<{
+      items: Array<{
+        id: number;
+        ts: string;
+        title?: string;
+        metadata?: Record<string, unknown> | null;
+      }>;
+    }>("/chat/sessions");
   }
 
-  async createChatSession(title?: string) {
-    return this.post<{ id: number }>("/chat/sessions", { title });
+  async createChatSession(title?: string, metadata?: Record<string, unknown>) {
+    return this.post<{ id: number }>("/chat/sessions", { title, metadata });
+  }
+
+  async updateChatSession(
+    sessionId: number,
+    input: { title?: string | null; metadata?: Record<string, unknown> | null }
+  ) {
+    return this.post<{ item: { id: number; title?: string; metadata?: Record<string, unknown> | null } }>(
+      `/chat/sessions/${sessionId}`,
+      input
+    );
+  }
+
+  async deleteChatSession(sessionId: number) {
+    const primary = await this.post<{ ok: boolean }>(`/chat/sessions/${sessionId}/delete`);
+    if (primary.ok || !primary.error.includes("(404)")) return primary;
+    return this.delete<{ ok: boolean }>(`/chat/sessions/${sessionId}`);
   }
 
   async listMessages(sessionId: number) {
-    return this.get<{ items: Array<{ id: number; role: string; content: string }> }>(
+    return this.get<{
+      items: Array<{
+        id: number;
+        role: string;
+        content: string;
+        ts: string;
+        metadata?: Record<string, unknown> | null;
+      }>;
+    }>(
       `/chat/messages?sessionId=${sessionId}`
     );
   }
 
-  async sendMessage(sessionId: number, content: string, skipAgent = false) {
+  async sendMessage(
+    sessionId: number,
+    content: string,
+    options?: { skipAgent?: boolean; model?: string; provider?: string }
+  ) {
     return this.post<{ messageId: number; assistantMessageId?: number; reply?: string }>(
       "/chat/messages",
-      { sessionId, role: "user", content, skipAgent }
+      {
+        sessionId,
+        role: "user",
+        content,
+        skipAgent: options?.skipAgent === true,
+        model: options?.model,
+        provider: options?.provider
+      }
     );
   }
 
@@ -165,6 +211,41 @@ export class OpenCorpoApi {
 
   async saveAiProvider(provider: string) {
     return this.post<{ ok: boolean }>("/secrets/ai-provider", { provider });
+  }
+
+  async getProfile() {
+    return this.get<{
+      profile: { name: string; role: string; jobTitle: string; about: string };
+    }>("/profile");
+  }
+
+  async saveProfile(profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  }) {
+    return this.post<{
+      ok: boolean;
+      profile: { name: string; role: string; jobTitle: string; about: string };
+    }>("/profile", profile);
+  }
+
+  async getAiModelDefaults() {
+    return this.get<{
+      defaults: { anthropic: string; openai: string; local: string };
+    }>("/secrets/ai-model-defaults");
+  }
+
+  async saveAiModelDefaults(defaults: {
+    anthropic: string;
+    openai: string;
+    local: string;
+  }) {
+    return this.post<{
+      ok: boolean;
+      defaults: { anthropic: string; openai: string; local: string };
+    }>("/secrets/ai-model-defaults", defaults);
   }
 
   // Diagnostics

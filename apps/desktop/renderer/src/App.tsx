@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useOpenCorpo } from "@/context/OpenCorpoContext";
@@ -49,6 +48,7 @@ export function App() {
           completeOnboarding={state.completeOnboarding}
           saveGmailToken={state.saveGmailToken}
           saveAiKey={state.saveAiKey}
+          saveProfile={state.saveProfile}
           saveAiProvider={state.saveAiProvider}
           checkAiKeyConfigured={state.checkAiKeyConfigured}
           getGmailOauthStart={state.getGmailOauthStart}
@@ -58,7 +58,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--oc-bg)] flex flex-col">
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--oc-bg)]">
       <header className="sticky top-0 z-10 flex-shrink-0 border-b border-[var(--oc-border)] bg-[var(--oc-bg-elevated)]/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
@@ -66,9 +66,6 @@ export function App() {
               OpenCorpo
             </span>
             <div className="hidden sm:flex items-center gap-2">
-              <Badge tone={state.daemonStatus.ready ? "success" : "warning"}>
-                {state.daemonStatus.ready ? "Connected" : "Connecting…"}
-              </Badge>
               {state.pendingApprovals.length > 0 && (
                 <Badge tone="warning">{state.pendingApprovals.length} pending</Badge>
               )}
@@ -76,13 +73,6 @@ export function App() {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void state.refreshData()}
-            >
-              Refresh
-            </Button>
           </div>
         </div>
 
@@ -95,7 +85,7 @@ export function App() {
         )}
       </header>
 
-      <div className="mx-auto flex w-full max-w-7xl flex-1 gap-4 px-4 py-4 sm:px-6 lg:gap-6">
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 gap-4 overflow-hidden px-4 py-4 sm:px-6 lg:gap-6">
         <aside className="hidden w-52 flex-shrink-0 lg:block">
           <nav className="sticky top-24 space-y-1 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2">
             {navItems
@@ -129,16 +119,14 @@ export function App() {
           </nav>
         </aside>
 
-        <main className="min-w-0 flex-1">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Routes>
             <Route
               path="/"
               element={
-                <ChatView
-                  apiBase={state.apiBase}
-                  launchToken={state.launchToken}
-                  daemonReady={state.daemonStatus.ready}
-                />
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <ChatView />
+                </div>
               }
             />
             <Route
@@ -163,7 +151,11 @@ export function App() {
                   plugins={state.plugins}
                   gmailStatus={state.gmailStatus}
                   onboarding={state.onboarding}
+                  profile={state.profile}
+                  aiModelDefaults={state.aiModelDefaults}
                   persistOnboarding={state.persistOnboarding}
+                  onSaveProfile={state.saveProfile}
+                  onSaveAiModelDefaults={state.saveAiModelDefaults}
                   saveAiProvider={state.saveAiProvider}
                   onRestartDaemon={state.restartDaemon}
                   onRunDiagnostics={state.runDiagnosticsNow}

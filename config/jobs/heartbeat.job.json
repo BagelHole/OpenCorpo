@@ -1,9 +1,0 @@
-{
-  "name": "Heartbeat",
-  "enabled": true,
-  "schedule": { "interval_seconds": 30 },
-  "capabilities_required": ["system.ping"],
-  "steps": [
-    { "tool": "system.ping", "with": { "message": "heartbeat" } }
-  ]
-}

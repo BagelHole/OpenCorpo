@@ -172,3 +172,51 @@ export function verifyAuditIntegrity(db: DbHandle) {
   }
   return { ok: true as const, count: rows.length };
 }
+
+export function repairAuditIntegrity(db: DbHandle) {
+  const rows = db
+    .query(
+      `SELECT id, ts, actor, action, tool, policy, metadata_json, prev_hash, entry_hash
+       FROM audit_log
+       ORDER BY id ASC`
+    )
+    .all() as Array<{
+    id: number;
+    ts: string;
+    actor: string;
+    action: string;
+    tool: string | null;
+    policy: string | null;
+    metadata_json: string | null;
+    prev_hash: string | null;
+    entry_hash: string | null;
+  }>;
+  let previousHash: string | null = null;
+  let repaired = 0;
+  const update = db.prepare(
+    `UPDATE audit_log
+     SET prev_hash = ?, entry_hash = ?
+     WHERE id = ?`
+  );
+  for (const row of rows) {
+    const expected = createHash("sha256")
+      .update(
+        JSON.stringify({
+          ts: row.ts,
+          actor: row.actor,
+          action: row.action,
+          tool: row.tool ?? null,
+          policy: row.policy ?? null,
+          metadata: row.metadata_json ? JSON.parse(String(row.metadata_json)) : null,
+          prevHash: previousHash
+        })
+      )
+      .digest("hex");
+    if (row.prev_hash !== previousHash || row.entry_hash !== expected) {
+      update.run(previousHash, expected, row.id);
+      repaired += 1;
+    }
+    previousHash = expected;
+  }
+  return { repaired, count: rows.length };
+}

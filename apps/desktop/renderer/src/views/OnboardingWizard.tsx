@@ -8,6 +8,12 @@ type OnboardingData = {
   aiProvider: "anthropic" | "openai" | "local";
   aiKey: string;
   gmailAccessToken: string;
+  profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  };
 };
 
 type Props = {
@@ -17,10 +23,27 @@ type Props = {
   completeOnboarding: () => void;
   saveGmailToken: (token: string) => Promise<void>;
   saveAiKey: (key: string) => Promise<void>;
+  saveProfile: (profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  }) => Promise<void>;
   saveAiProvider?: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
 };
+
+function normalizeProfile(
+  profile: OnboardingData["profile"] | null | undefined
+): OnboardingData["profile"] {
+  return {
+    name: profile?.name ?? "",
+    role: profile?.role ?? "",
+    jobTitle: profile?.jobTitle ?? "",
+    about: profile?.about ?? ""
+  };
+}
 
 export function OnboardingWizard({
   onboarding,
@@ -29,6 +52,7 @@ export function OnboardingWizard({
   completeOnboarding,
   saveGmailToken,
   saveAiKey,
+  saveProfile,
   saveAiProvider,
   checkAiKeyConfigured,
   getGmailOauthStart
@@ -36,6 +60,7 @@ export function OnboardingWizard({
   const [step, setStep] = useState(0);
   const [tokenInput, setTokenInput] = useState(onboarding.gmailAccessToken ?? "");
   const [aiKeyInput, setAiKeyInput] = useState(onboarding.aiKey ?? "");
+  const [profileInput, setProfileInput] = useState(() => normalizeProfile(onboarding.profile));
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -43,6 +68,7 @@ export function OnboardingWizard({
   const steps = useMemo(
     () => [
       "Welcome",
+      "Your Profile",
       "Choose AI Provider",
       "Enter API Key",
       "Connect Gmail (Optional)",
@@ -63,10 +89,30 @@ export function OnboardingWizard({
   };
 
   useEffect(() => {
-    if (step === 2) {
+    if (step === 3) {
       void checkAiKeyConfigured().then(setAiKeyConfigured);
     }
   }, [step, checkAiKeyConfigured]);
+
+  useEffect(() => {
+    setProfileInput(normalizeProfile(onboarding.profile));
+  }, [onboarding.profile]);
+
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await saveProfile(profileInput);
+      persistOnboarding({
+        ...onboarding,
+        profile: profileInput
+      });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Unable to save profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSaveAiKey = async () => {
     if (!aiKeyInput.trim()) {
@@ -160,6 +206,52 @@ export function OnboardingWizard({
           {step === 1 && (
             <div className="space-y-4 text-sm">
               <p className="text-[var(--oc-ink-muted)]">
+                Tell OpenCorpo who you are so responses can match your context.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  value={profileInput.name}
+                  onChange={(event) =>
+                    setProfileInput((current) => ({ ...current, name: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
+                  placeholder="Your name"
+                />
+                <input
+                  value={profileInput.role}
+                  onChange={(event) =>
+                    setProfileInput((current) => ({ ...current, role: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
+                  placeholder="Role (e.g. Founder)"
+                />
+                <input
+                  value={profileInput.jobTitle}
+                  onChange={(event) =>
+                    setProfileInput((current) => ({ ...current, jobTitle: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)] sm:col-span-2"
+                  placeholder="Job title"
+                />
+                <textarea
+                  value={profileInput.about}
+                  onChange={(event) =>
+                    setProfileInput((current) => ({ ...current, about: event.target.value }))
+                  }
+                  rows={3}
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)] sm:col-span-2"
+                  placeholder="Anything else the AI should know about you..."
+                />
+              </div>
+              <Button onClick={() => void handleSaveProfile()} disabled={saving}>
+                {saving ? "Saving..." : "Save profile"}
+              </Button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4 text-sm">
+              <p className="text-[var(--oc-ink-muted)]">
                 Pick your default AI provider. You can change this later in settings.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -186,7 +278,7 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <div className="space-y-4 text-sm">
               <p className="text-[var(--oc-ink-muted)]">
                 Enter your API key for {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "your local/BYOK provider"}. You can change this later in settings.
@@ -220,7 +312,7 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="space-y-4 text-sm text-[var(--oc-ink-muted)]">
               <div className="flex items-center gap-3">
                 <span>Gmail status:</span>
@@ -254,7 +346,7 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-3 text-sm text-[var(--oc-ink-muted)]">
               <p>Everything is ready. OpenCorpo will now launch your clean workspace.</p>
               <ul className="space-y-1">
@@ -276,8 +368,18 @@ export function OnboardingWizard({
               Back
             </Button>
             {step < steps.length - 1 ? (
-              <Button onClick={() => setStep((prev) => Math.min(steps.length - 1, prev + 1))}>
-                {step === 3 ? "Continue without Gmail" : "Continue"}
+              <Button
+                onClick={() => {
+                  if (step === 1) {
+                    persistOnboarding({
+                      ...onboarding,
+                      profile: profileInput
+                    });
+                  }
+                  setStep((prev) => Math.min(steps.length - 1, prev + 1));
+                }}
+              >
+                {step === 4 ? "Continue without Gmail" : "Continue"}
               </Button>
             ) : (
               <Button onClick={() => void finish()}>Enter OpenCorpo</Button>

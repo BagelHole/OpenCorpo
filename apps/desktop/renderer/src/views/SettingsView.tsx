@@ -38,7 +38,39 @@ type OnboardingData = {
   aiProvider: "anthropic" | "openai" | "local";
   aiKey: string;
   gmailAccessToken: string;
+  profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  };
 };
+
+function normalizeProfile(profile: {
+  name?: string;
+  role?: string;
+  jobTitle?: string;
+  about?: string;
+} | null | undefined) {
+  return {
+    name: profile?.name ?? "",
+    role: profile?.role ?? "",
+    jobTitle: profile?.jobTitle ?? "",
+    about: profile?.about ?? ""
+  };
+}
+
+function normalizeModelDefaults(defaults: {
+  anthropic?: string;
+  openai?: string;
+  local?: string;
+} | null | undefined) {
+  return {
+    anthropic: defaults?.anthropic ?? "",
+    openai: defaults?.openai ?? "",
+    local: defaults?.local ?? ""
+  };
+}
 
 export function SettingsView({
   daemonStatus,
@@ -46,7 +78,11 @@ export function SettingsView({
   plugins,
   gmailStatus,
   onboarding,
+  profile,
+  aiModelDefaults,
   persistOnboarding,
+  onSaveProfile,
+  onSaveAiModelDefaults,
   saveAiProvider,
   onRestartDaemon,
   onRunDiagnostics,
@@ -64,7 +100,29 @@ export function SettingsView({
   plugins: PluginInfo[];
   gmailStatus: GmailStatus;
   onboarding: OnboardingData;
+  profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  };
+  aiModelDefaults: {
+    anthropic: string;
+    openai: string;
+    local: string;
+  };
   persistOnboarding: (next: OnboardingData) => void;
+  onSaveProfile: (profile: {
+    name: string;
+    role: string;
+    jobTitle: string;
+    about: string;
+  }) => Promise<void>;
+  onSaveAiModelDefaults: (defaults: {
+    anthropic: string;
+    openai: string;
+    local: string;
+  }) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
@@ -82,7 +140,19 @@ export function SettingsView({
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [profileInput, setProfileInput] = useState(() => normalizeProfile(profile));
+  const [modelDefaultsInput, setModelDefaultsInput] = useState(() =>
+    normalizeModelDefaults(aiModelDefaults)
+  );
   const pluginFailures = useMemo(() => plugins.filter((p) => !p.loaded), [plugins]);
+
+  useEffect(() => {
+    setProfileInput(normalizeProfile(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    setModelDefaultsInput(normalizeModelDefaults(aiModelDefaults));
+  }, [aiModelDefaults]);
 
   useEffect(() => {
     void checkAiKeyConfigured().then(setAiKeyConfigured);
@@ -130,6 +200,28 @@ export function SettingsView({
     await onSaveGmailToken(tokenInput.trim());
     setTokenInput("");
     setLocalMessage("Token saved.");
+  };
+
+  const saveProfile = async () => {
+    try {
+      await onSaveProfile(profileInput);
+      persistOnboarding({
+        ...onboarding,
+        profile: profileInput
+      });
+      setLocalMessage("Profile saved.");
+    } catch (error) {
+      setLocalMessage(error instanceof Error ? error.message : "Failed to save profile.");
+    }
+  };
+
+  const saveModelDefaults = async () => {
+    try {
+      await onSaveAiModelDefaults(modelDefaultsInput);
+      setAiKeyMessage("Default models saved.");
+    } catch (error) {
+      setAiKeyMessage(error instanceof Error ? error.message : "Failed to save model defaults.");
+    }
   };
 
   return (
@@ -220,6 +312,44 @@ export function SettingsView({
 
       <Card>
         <CardHeader>
+          <CardTitle>Model Defaults</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-xs text-[var(--oc-ink-muted)]">
+            Choose default model per provider. Chat tabs can override these.
+          </p>
+          <input
+            value={modelDefaultsInput.anthropic}
+            onChange={(event) =>
+              setModelDefaultsInput((current) => ({ ...current, anthropic: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Anthropic default model (e.g. anthropic/claude-sonnet-4.5)"
+          />
+          <input
+            value={modelDefaultsInput.openai}
+            onChange={(event) =>
+              setModelDefaultsInput((current) => ({ ...current, openai: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="OpenAI default model (e.g. gpt-5.2-chat-latest)"
+          />
+          <input
+            value={modelDefaultsInput.local}
+            onChange={(event) =>
+              setModelDefaultsInput((current) => ({ ...current, local: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Local/BYOK default model"
+          />
+          <Button size="sm" onClick={() => void saveModelDefaults()}>
+            Save model defaults
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Gmail</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
@@ -253,6 +383,50 @@ export function SettingsView({
               {localMessage}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>User Profile</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <input
+            value={profileInput.name}
+            onChange={(event) =>
+              setProfileInput((current) => ({ ...current, name: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Name"
+          />
+          <input
+            value={profileInput.role}
+            onChange={(event) =>
+              setProfileInput((current) => ({ ...current, role: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Role"
+          />
+          <input
+            value={profileInput.jobTitle}
+            onChange={(event) =>
+              setProfileInput((current) => ({ ...current, jobTitle: event.target.value }))
+            }
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Job title"
+          />
+          <textarea
+            value={profileInput.about}
+            onChange={(event) =>
+              setProfileInput((current) => ({ ...current, about: event.target.value }))
+            }
+            rows={3}
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Anything else the AI should know..."
+          />
+          <Button size="sm" onClick={() => void saveProfile()}>
+            Save profile
+          </Button>
         </CardContent>
       </Card>
 

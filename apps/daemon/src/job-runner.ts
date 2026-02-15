@@ -1,4 +1,7 @@
 import type { DbHandle } from "./db";
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { isAbsolute, relative, resolve } from "node:path";
 import { writeAudit } from "./audit";
 import { writeEvent } from "./events";
 import { getJobById } from "./jobs";
@@ -7,6 +10,7 @@ import { evaluatePolicy, type PolicyFile } from "./policy";
 import { executeTool } from "./tool-runner";
 import { findTool } from "./tools";
 import { validateToolInput, type ToolRegistry } from "./tool-registry";
+import { jobsScriptsRoot } from "./paths";
 
 export type JobRunRow = {
   id: number;
@@ -107,6 +111,47 @@ export async function processQueuedRuns(
     const steps = Array.isArray(job.definition.steps)
       ? (job.definition.steps as JobStep[])
       : [];
+    const scriptConfig =
+      job.definition &&
+      typeof job.definition === "object" &&
+      job.definition.script &&
+      typeof job.definition.script === "object"
+        ? (job.definition.script as Record<string, unknown>)
+        : null;
+
+    if (scriptConfig) {
+      const scriptResult = await runScriptJob(scriptConfig);
+      if (!scriptResult.ok) {
+        updateJobRunStatus(db, run.id, "failed", {
+          error: "script_failed",
+          script: scriptResult
+        });
+        writeAudit(db, {
+          actor: "system",
+          action: "job_run_failed",
+          metadata: { jobRunId: run.id, jobId: run.job_id, reason: "script_failed" }
+        });
+        writeEvent(db, {
+          type: "job.run.failed",
+          data: { jobRunId: run.id, jobId: run.job_id }
+        });
+        continue;
+      }
+      updateJobRunStatus(db, run.id, "completed", {
+        ok: true,
+        script: scriptResult
+      });
+      writeAudit(db, {
+        actor: "system",
+        action: "job_run_completed",
+        metadata: { jobRunId: run.id, jobId: run.job_id, mode: "script" }
+      });
+      writeEvent(db, {
+        type: "job.run.completed",
+        data: { jobRunId: run.id, jobId: run.job_id }
+      });
+      continue;
+    }
 
     const outputs: Array<Record<string, unknown>> = state.outputs ?? [];
     let blocked = false;
@@ -244,4 +289,143 @@ export function parseRunState(raw: string | null): RunState {
   } catch {
     return { stepIndex: 0, outputs: [] };
   }
+}
+
+type ScriptRunResult =
+  | {
+      ok: true;
+      command: string;
+      args: string[];
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+      elapsedMs: number;
+    }
+  | {
+      ok: false;
+      error: string;
+      command?: string;
+      args?: string[];
+      stdout?: string;
+      stderr?: string;
+      exitCode?: number | null;
+      elapsedMs?: number;
+    };
+
+function resolveBunBinary() {
+  if (process.env.BUN_BINARY && process.env.BUN_BINARY.trim()) {
+    return process.env.BUN_BINARY.trim();
+  }
+  if (process.execPath && /bun(\.exe)?$/i.test(process.execPath)) {
+    return process.execPath;
+  }
+  return "bun";
+}
+
+function resolveScriptPath(scriptPath: string) {
+  if (!scriptPath.trim()) return null;
+  if (isAbsolute(scriptPath)) return null;
+  const absolutePath = resolve(jobsScriptsRoot, scriptPath);
+  const rel = relative(jobsScriptsRoot, absolutePath);
+  if (rel.startsWith("..") || rel.includes(":")) return null;
+  return absolutePath;
+}
+
+async function runScriptJob(script: Record<string, unknown>): Promise<ScriptRunResult> {
+  const scriptPath = typeof script.path === "string" ? script.path : "";
+  const absolutePath = resolveScriptPath(scriptPath);
+  if (!absolutePath) return { ok: false, error: "invalid_script_path" };
+  if (!existsSync(absolutePath)) return { ok: false, error: "script_not_found" };
+
+  const args = Array.isArray(script.args)
+    ? script.args.map((arg) => String(arg))
+    : [];
+  const timeoutMs =
+    typeof script.timeout_ms === "number" && Number.isFinite(script.timeout_ms)
+      ? Math.max(1000, Number(script.timeout_ms))
+      : 120000;
+  const envInput =
+    script.env && typeof script.env === "object"
+      ? (script.env as Record<string, unknown>)
+      : {};
+  const env = Object.fromEntries(
+    Object.entries(envInput).map(([key, value]) => [key, String(value)])
+  );
+  const command = resolveBunBinary();
+  const commandArgs = ["run", absolutePath, ...args];
+
+  return await new Promise<ScriptRunResult>((resolveResult) => {
+    const started = Date.now();
+    const child = spawn(command, commandArgs, {
+      cwd: jobsScriptsRoot,
+      env: { ...process.env, ...env },
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolveResult({
+        ok: false,
+        error: error.message,
+        command,
+        args: commandArgs,
+        stdout,
+        stderr,
+        exitCode: null,
+        elapsedMs: Date.now() - started
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const elapsedMs = Date.now() - started;
+      if (timedOut) {
+        resolveResult({
+          ok: false,
+          error: `script_timeout_${timeoutMs}ms`,
+          command,
+          args: commandArgs,
+          stdout,
+          stderr,
+          exitCode: code,
+          elapsedMs
+        });
+        return;
+      }
+      if (code !== 0) {
+        resolveResult({
+          ok: false,
+          error: `script_exit_${code ?? "unknown"}`,
+          command,
+          args: commandArgs,
+          stdout,
+          stderr,
+          exitCode: code,
+          elapsedMs
+        });
+        return;
+      }
+      resolveResult({
+        ok: true,
+        command,
+        args: commandArgs,
+        stdout,
+        stderr,
+        exitCode: code ?? 0,
+        elapsedMs
+      });
+    });
+  });
 }

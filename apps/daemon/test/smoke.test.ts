@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runMigrations } from "../../../packages/core/src/migrations";
@@ -57,5 +57,50 @@ describe("daemon smoke", () => {
       readFileSync(join(tempRoot, "jobs/heartbeat.job.json"), "utf-8")
     ) as { schedule: { interval_seconds: number } };
     expect(saved.schedule.interval_seconds).toBe(45);
+  });
+
+  test("runs script jobs from userland/jobs", async () => {
+    const db = new Database(":memory:");
+    runMigrations(db);
+    const { jobsScriptsRoot } = await import("../src/paths");
+    mkdirSync(jobsScriptsRoot, { recursive: true });
+    const scriptName = `hello-smoke-${Date.now()}.js`;
+    const scriptPath = join(jobsScriptsRoot, scriptName);
+    writeFileSync(scriptPath, `console.log("hello-from-script-job");`, "utf-8");
+    try {
+      const { createJob, recordJobRun } = await import("../src/jobs");
+      const { listJobRuns, processQueuedRuns } = await import("../src/job-runner");
+      const jobId = createJob(db, {
+        name: "Script smoke",
+        enabled: true,
+        definition: {
+          name: "Script smoke",
+          enabled: true,
+          script: {
+            path: scriptName,
+            timeout_ms: 20000
+          }
+        }
+      });
+      const runId = recordJobRun(db, jobId, "queued");
+
+      await processQueuedRuns(
+        db,
+        {
+          definitions: [],
+          handlers: new Map(),
+          warnings: [],
+          validators: new Map()
+        },
+        null
+      );
+
+      const run = listJobRuns(db, 20).find((item) => item.id === runId);
+      expect(run?.status).toBe("completed");
+      const output = run?.output as { script?: { stdout?: string } } | null;
+      expect(output?.script?.stdout?.includes("hello-from-script-job")).toBe(true);
+    } finally {
+      rmSync(scriptPath, { force: true });
+    }
   });
 });

@@ -49,12 +49,18 @@ html {
   font-size: clamp(14px, 1.5vw, 16px);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  height: 100%;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   background: var(--oc-bg);
+  height: 100%;
+}
+
+#root {
+  height: 100%;
 }
 
 * {
@@ -102,4 +108,75 @@ button, input, textarea {
 
 .oc-pulse {
   animation: oc-pulse 1.5s ease-in-out infinite;
+}
+
+.oc-markdown {
+  line-height: 1.55;
+}
+
+.oc-markdown p {
+  margin: 0 0 0.65rem;
+}
+
+.oc-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.oc-markdown ul,
+.oc-markdown ol {
+  margin: 0.4rem 0 0.7rem 1rem;
+}
+
+.oc-markdown code {
+  border-radius: 0.3rem;
+  background: var(--oc-bg);
+  padding: 0.1rem 0.3rem;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.86em;
+}
+
+.oc-markdown pre {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  border: 1px solid var(--oc-border);
+  background: var(--oc-bg);
+  padding: 0.6rem;
+}
+
+.oc-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.oc-markdown a {
+  color: var(--oc-accent);
+  text-decoration: underline;
+}
+
+.oc-scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(115, 115, 115, 0.2) transparent;
+}
+
+.oc-scrollbar-subtle:hover {
+  scrollbar-color: rgba(115, 115, 115, 0.35) transparent;
+}
+
+.oc-scrollbar-subtle::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.oc-scrollbar-subtle::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.oc-scrollbar-subtle::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgba(115, 115, 115, 0.18);
+}
+
+.oc-scrollbar-subtle:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(115, 115, 115, 0.35);
 }

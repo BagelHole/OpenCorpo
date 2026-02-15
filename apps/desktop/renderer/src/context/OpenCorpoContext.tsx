@@ -24,6 +24,41 @@ export type OnboardingData = {
   aiProvider: "anthropic" | "openai" | "local";
   aiKey: string;
   gmailAccessToken: string;
+  profile: UserProfile;
+};
+
+export type UserProfile = {
+  name: string;
+  role: string;
+  jobTitle: string;
+  about: string;
+};
+
+export type AiModelDefaults = {
+  anthropic: string;
+  openai: string;
+  local: string;
+};
+
+export type ChatSessionMetadata = {
+  emoji?: string;
+  color?: string;
+  order?: number;
+  provider?: "anthropic" | "openai" | "local";
+  model?: string;
+};
+
+export type ChatSessionRecord = {
+  id: number;
+  title: string;
+  metadata: ChatSessionMetadata;
+};
+
+export type ChatMessageRecord = {
+  id: number;
+  role: "user" | "assistant" | "system";
+  content: string;
+  ts: string;
 };
 
 export type DaemonStatus = {
@@ -43,6 +78,119 @@ export type GmailStatus = {
 };
 
 const ONBOARDING_KEY = "opencorpo_onboarding_v2";
+const ACTIVE_CHAT_SESSION_KEY = "opencorpo_active_chat_session";
+const CHAT_SESSIONS_CACHE_KEY = "opencorpo_chat_sessions_cache_v1";
+const CHAT_MESSAGES_CACHE_KEY = "opencorpo_chat_messages_cache_v1";
+
+function writeOnboarding(next: OnboardingData) {
+  localStorage.setItem(ONBOARDING_KEY, JSON.stringify(next));
+}
+
+function readStoredActiveSessionId() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_CHAT_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeChatSessionsCache(next: ChatSessionRecord[]) {
+  try {
+    localStorage.setItem(CHAT_SESSIONS_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+function readChatSessionsCache(): ChatSessionRecord[] {
+  try {
+    const raw = localStorage.getItem(CHAT_SESSIONS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry): ChatSessionRecord | null => {
+        if (!entry || typeof entry !== "object") return null;
+        const row = entry as Record<string, unknown>;
+        const id = Number(row.id);
+        if (!Number.isFinite(id)) return null;
+        const title = typeof row.title === "string" && row.title.trim() ? row.title : `Conversation ${id}`;
+        const metadataRaw =
+          row.metadata && typeof row.metadata === "object"
+            ? (row.metadata as Record<string, unknown>)
+            : {};
+        const providerRaw = metadataRaw.provider;
+        const provider =
+          providerRaw === "anthropic" || providerRaw === "openai" || providerRaw === "local"
+            ? providerRaw
+            : undefined;
+        const orderRaw = metadataRaw.order;
+        const order =
+          typeof orderRaw === "number" && Number.isFinite(orderRaw) ? Number(orderRaw) : undefined;
+        return {
+          id,
+          title,
+          metadata: {
+            emoji: typeof metadataRaw.emoji === "string" ? metadataRaw.emoji : undefined,
+            color: typeof metadataRaw.color === "string" ? metadataRaw.color : undefined,
+            provider,
+            model: typeof metadataRaw.model === "string" ? metadataRaw.model : undefined,
+            order,
+          },
+        };
+      })
+      .filter((item): item is ChatSessionRecord => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function writeChatMessagesCache(next: Record<number, ChatMessageRecord[]>) {
+  try {
+    localStorage.setItem(CHAT_MESSAGES_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+function readChatMessagesCache(): Record<number, ChatMessageRecord[]> {
+  try {
+    const raw = localStorage.getItem(CHAT_MESSAGES_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<number, ChatMessageRecord[]> = {};
+    for (const [sessionIdRaw, messagesRaw] of Object.entries(parsed)) {
+      const sessionId = Number(sessionIdRaw);
+      if (!Number.isFinite(sessionId) || !Array.isArray(messagesRaw)) continue;
+      out[sessionId] = messagesRaw
+        .map((msg): ChatMessageRecord | null => {
+          if (!msg || typeof msg !== "object") return null;
+          const row = msg as Record<string, unknown>;
+          const id = Number(row.id);
+          if (!Number.isFinite(id)) return null;
+          const roleRaw = row.role;
+          const role =
+            roleRaw === "assistant" || roleRaw === "system" || roleRaw === "user"
+              ? roleRaw
+              : "user";
+          return {
+            id,
+            role,
+            content: typeof row.content === "string" ? row.content : "",
+            ts: typeof row.ts === "string" ? row.ts : "",
+          };
+        })
+        .filter((item): item is ChatMessageRecord => Boolean(item));
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function readOnboarding(): OnboardingData {
   try {
@@ -53,6 +201,12 @@ function readOnboarding(): OnboardingData {
         aiProvider: "anthropic",
         aiKey: "",
         gmailAccessToken: "",
+        profile: {
+          name: "",
+          role: "",
+          jobTitle: "",
+          about: "",
+        },
       };
     }
     const parsed = JSON.parse(raw) as OnboardingData;
@@ -64,6 +218,12 @@ function readOnboarding(): OnboardingData {
           : "anthropic",
       aiKey: parsed.aiKey ?? "",
       gmailAccessToken: parsed.gmailAccessToken ?? "",
+      profile: {
+        name: parsed.profile?.name ?? "",
+        role: parsed.profile?.role ?? "",
+        jobTitle: parsed.profile?.jobTitle ?? "",
+        about: parsed.profile?.about ?? "",
+      },
     };
   } catch {
     return {
@@ -71,6 +231,12 @@ function readOnboarding(): OnboardingData {
       aiProvider: "anthropic",
       aiKey: "",
       gmailAccessToken: "",
+      profile: {
+        name: "",
+        role: "",
+        jobTitle: "",
+        about: "",
+      },
     };
   }
 }
@@ -88,14 +254,36 @@ type OpenCorpoContextValue = {
   tools: ToolInfo[];
   diagnostics: DiagnosticsReport | null;
   onboarding: OnboardingData;
+  profile: UserProfile;
+  aiModelDefaults: AiModelDefaults;
   gmailStatus: GmailStatus;
   pendingApprovals: Approval[];
+  chatSessions: ChatSessionRecord[];
+  activeChatSessionId: number | null;
+  chatMessages: ChatMessageRecord[];
+  chatLoading: boolean;
+  chatError: string | null;
   api: OpenCorpoApi | null;
   // Actions
   refreshData: () => Promise<void>;
   refreshDaemonStatus: () => Promise<DaemonStatus | null>;
   persistOnboarding: (next: OnboardingData) => void;
   completeOnboarding: () => void;
+  saveProfile: (profile: UserProfile) => Promise<void>;
+  saveAiModelDefaults: (defaults: AiModelDefaults) => Promise<void>;
+  refreshChatSessions: () => Promise<void>;
+  createChatSession: (input?: {
+    title?: string;
+    metadata?: ChatSessionMetadata;
+  }) => Promise<number | null>;
+  updateChatSession: (
+    sessionId: number,
+    input: { title?: string | null; metadata?: ChatSessionMetadata | null }
+  ) => Promise<void>;
+  deleteChatSession: (sessionId: number) => Promise<void>;
+  reorderChatSessions: (orderedSessionIds: number[]) => Promise<void>;
+  selectChatSession: (sessionId: number) => Promise<void>;
+  sendChatMessage: (content: string) => Promise<void>;
   saveGmailToken: (token: string) => Promise<void>;
   saveAiKey: (key: string) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
@@ -132,15 +320,53 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsReport | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingData>(readOnboarding);
+  const [profile, setProfile] = useState<UserProfile>({
+    name: "",
+    role: "",
+    jobTitle: "",
+    about: "",
+  });
+  const [aiModelDefaults, setAiModelDefaults] = useState<AiModelDefaults>({
+    anthropic: "",
+    openai: "",
+    local: "",
+  });
   const [gmailStatus, setGmailStatus] = useState<GmailStatus>({
     connected: false,
     tokenSource: null,
     refreshConfigured: false,
   });
+  const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(readChatSessionsCache);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<number | null>(
+    readStoredActiveSessionId
+  );
+  const [chatMessagesBySession, setChatMessagesBySession] = useState<
+    Record<number, ChatMessageRecord[]>
+  >(readChatMessagesCache);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const tokenRef = useRef(launchToken);
   const apiRef = useRef<OpenCorpoApi | null>(null);
+  const activeChatSessionIdRef = useRef<number | null>(null);
+  const chatMessagesBySessionRef = useRef<Record<number, ChatMessageRecord[]>>({});
   tokenRef.current = launchToken;
+
+  useEffect(() => {
+    activeChatSessionIdRef.current = activeChatSessionId;
+  }, [activeChatSessionId]);
+
+  useEffect(() => {
+    chatMessagesBySessionRef.current = chatMessagesBySession;
+  }, [chatMessagesBySession]);
+
+  useEffect(() => {
+    writeChatSessionsCache(chatSessions);
+  }, [chatSessions]);
+
+  useEffect(() => {
+    writeChatMessagesCache(chatMessagesBySession);
+  }, [chatMessagesBySession]);
 
   const api = useMemo(() => {
     const instance =
@@ -150,6 +376,73 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     apiRef.current = instance;
     return instance;
   }, [apiBase, launchToken]);
+
+  const readStoredActiveSession = useCallback(() => {
+    return readStoredActiveSessionId();
+  }, []);
+
+  const persistActiveSession = useCallback((sessionId: number | null) => {
+    try {
+      if (sessionId === null) {
+        localStorage.removeItem(ACTIVE_CHAT_SESSION_KEY);
+      } else {
+        localStorage.setItem(ACTIVE_CHAT_SESSION_KEY, String(sessionId));
+      }
+    } catch {
+      // ignore storage write errors
+    }
+  }, []);
+
+  const mapSessionRow = useCallback((row: {
+    id: number;
+    title?: string;
+    metadata?: Record<string, unknown> | null;
+  }): ChatSessionRecord => {
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    const providerRaw =
+      typeof metadata.provider === "string" ? metadata.provider : undefined;
+    const provider =
+      providerRaw === "anthropic" || providerRaw === "openai" || providerRaw === "local"
+        ? providerRaw
+        : undefined;
+    const orderRaw = metadata.order;
+    const order =
+      typeof orderRaw === "number" && Number.isFinite(orderRaw) ? Number(orderRaw) : undefined;
+    return {
+      id: row.id,
+      title:
+        (typeof row.title === "string" && row.title.trim()) ||
+        `Conversation ${row.id}`,
+      metadata: {
+        emoji: typeof metadata.emoji === "string" ? metadata.emoji : undefined,
+        color: typeof metadata.color === "string" ? metadata.color : undefined,
+        order,
+        provider,
+        model: typeof metadata.model === "string" ? metadata.model : undefined,
+      },
+    };
+  }, []);
+
+  const loadProfileAndModels = useCallback(async (client: OpenCorpoApi) => {
+    const [profileRes, modelRes] = await Promise.all([
+      client.getProfile(),
+      client.getAiModelDefaults(),
+    ]);
+    if (profileRes.ok) {
+      setProfile(profileRes.data.profile);
+      setOnboarding((current) => {
+        const next = {
+          ...current,
+          profile: profileRes.data.profile,
+        };
+        writeOnboarding(next);
+        return next;
+      });
+    }
+    if (modelRes.ok) {
+      setAiModelDefaults(modelRes.data.defaults);
+    }
+  }, []);
 
   const refreshDaemonStatus = useCallback(async () => {
     if (!window.opencorpo?.daemon) {
@@ -210,9 +503,275 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     }
   }, [api, daemonStatus.ready]);
 
+  const selectChatSession = useCallback(
+    async (sessionId: number) => {
+      const currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready) return;
+      setActiveChatSessionId(sessionId);
+      persistActiveSession(sessionId);
+      if (chatMessagesBySessionRef.current[sessionId]) return;
+      const messagesRes = await currentApi.listMessages(sessionId);
+      if (!messagesRes.ok) {
+        setChatError(messagesRes.error);
+        return;
+      }
+      setChatMessagesBySession((current) => ({
+        ...current,
+        [sessionId]: messagesRes.data.items.map((msg) => ({
+          id: msg.id,
+          role:
+            msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+          content: msg.content,
+          ts: msg.ts,
+        })),
+      }));
+      setChatError(null);
+    },
+    [daemonStatus.ready, persistActiveSession]
+  );
+
+  const refreshChatSessions = useCallback(async () => {
+    const currentApi = apiRef.current;
+    if (!currentApi || !daemonStatus.ready) return;
+    setChatLoading(true);
+    const sessionsRes = await currentApi.listSessions();
+    if (!sessionsRes.ok) {
+      setChatError(sessionsRes.error);
+      setChatLoading(false);
+      return;
+    }
+    let sessions = sessionsRes.data.items.map((item) => mapSessionRow(item));
+    if (sessions.length === 0) {
+      const created = await currentApi.createChatSession("New conversation", {
+        emoji: "💬",
+        color: "slate",
+      });
+      if (created.ok) {
+        const reread = await currentApi.listSessions();
+        if (reread.ok) {
+          sessions = reread.data.items.map((item) => mapSessionRow(item));
+        }
+      }
+    }
+    setChatSessions(sessions);
+    const preferredSessionId = readStoredActiveSession();
+    const currentActive = activeChatSessionIdRef.current;
+    const activeCandidate =
+      currentActive && sessions.some((s) => s.id === currentActive)
+        ? currentActive
+        : preferredSessionId && sessions.some((s) => s.id === preferredSessionId)
+          ? preferredSessionId
+          : sessions[0]?.id ?? null;
+    if (activeCandidate !== null) {
+      await selectChatSession(activeCandidate);
+    } else {
+      setActiveChatSessionId(null);
+      persistActiveSession(null);
+    }
+    setChatLoading(false);
+    setChatError(null);
+  }, [
+    daemonStatus.ready,
+    mapSessionRow,
+    persistActiveSession,
+    readStoredActiveSession,
+    selectChatSession,
+  ]);
+
+  const createChatSession = useCallback(
+    async (input?: { title?: string; metadata?: ChatSessionMetadata }) => {
+      const currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready) return null;
+      const created = await currentApi.createChatSession(
+        input?.title ?? "New conversation",
+        input?.metadata
+      );
+      if (!created.ok) {
+        setChatError(created.error);
+        return null;
+      }
+      await refreshChatSessions();
+      const nextId = created.data.id;
+      await selectChatSession(nextId);
+      return nextId;
+    },
+    [daemonStatus.ready, refreshChatSessions, selectChatSession]
+  );
+
+  const updateChatSession = useCallback(
+    async (
+      sessionId: number,
+      input: { title?: string | null; metadata?: ChatSessionMetadata | null }
+    ) => {
+      const currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready) return;
+      const result = await currentApi.updateChatSession(sessionId, input);
+      if (!result.ok) {
+        setChatError(result.error);
+        return;
+      }
+      setChatSessions((current) =>
+        current.map((session) =>
+          session.id === sessionId ? mapSessionRow(result.data.item) : session
+        )
+      );
+      setChatError(null);
+    },
+    [daemonStatus.ready, mapSessionRow]
+  );
+
+  const deleteChatSession = useCallback(
+    async (sessionId: number) => {
+      let currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready) return;
+      let result = await currentApi.deleteChatSession(sessionId);
+      if (!result.ok && result.error.includes("(404)") && window.opencorpo?.daemon) {
+        await window.opencorpo.daemon.restart();
+        await refreshDaemonStatus();
+        currentApi = apiRef.current;
+        if (currentApi) {
+          result = await currentApi.deleteChatSession(sessionId);
+        }
+      }
+      if (!result.ok) {
+        setChatError(result.error);
+        return;
+      }
+      let remainingSessions: ChatSessionRecord[] = [];
+      setChatSessions((current) => {
+        remainingSessions = current.filter((session) => session.id !== sessionId);
+        return remainingSessions;
+      });
+      setChatMessagesBySession((current) => {
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
+      if (activeChatSessionIdRef.current === sessionId) {
+        const fallbackSessionId = remainingSessions[0]?.id ?? null;
+        if (fallbackSessionId !== null) {
+          await selectChatSession(fallbackSessionId);
+        } else {
+          setActiveChatSessionId(null);
+          persistActiveSession(null);
+        }
+      }
+      setChatError(null);
+    },
+    [daemonStatus.ready, persistActiveSession, refreshDaemonStatus, selectChatSession]
+  );
+
+  const reorderChatSessions = useCallback(
+    async (orderedSessionIds: number[]) => {
+      const currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready) return;
+      if (orderedSessionIds.length !== chatSessions.length) return;
+      const byId = new Map(chatSessions.map((session) => [session.id, session] as const));
+      const reordered = orderedSessionIds
+        .map((sessionId) => byId.get(sessionId))
+        .filter((session): session is ChatSessionRecord => Boolean(session));
+      if (reordered.length !== chatSessions.length) return;
+      const withOrder = reordered.map((session, index) => ({
+        ...session,
+        metadata: { ...session.metadata, order: index },
+      }));
+      setChatSessions(withOrder);
+      const results = await Promise.all(
+        withOrder.map((session, index) =>
+          currentApi.updateChatSession(session.id, {
+            title: session.title,
+            metadata: { ...session.metadata, order: index },
+          })
+        )
+      );
+      const failed = results.find((result) => !result.ok);
+      if (failed && !failed.ok) {
+        setChatError(failed.error);
+        await refreshChatSessions();
+        return;
+      }
+      setChatError(null);
+    },
+    [chatSessions, daemonStatus.ready, refreshChatSessions]
+  );
+
+  const sendChatMessage = useCallback(
+    async (content: string) => {
+      const currentApi = apiRef.current;
+      if (!currentApi || !daemonStatus.ready || !activeChatSessionId) return;
+      const text = content.trim();
+      if (!text) return;
+      const activeSession = chatSessions.find((session) => session.id === activeChatSessionId);
+      const optimisticMessageId = -Date.now();
+      setChatMessagesBySession((current) => ({
+        ...current,
+        [activeChatSessionId]: [
+          ...(current[activeChatSessionId] ?? []),
+          {
+            id: optimisticMessageId,
+            role: "user",
+            content: text,
+            ts: new Date().toISOString(),
+          },
+        ],
+      }));
+      const sendRes = await currentApi.sendMessage(activeChatSessionId, text, {
+        provider: activeSession?.metadata.provider,
+        model: activeSession?.metadata.model,
+      });
+      if (!sendRes.ok) {
+        setChatMessagesBySession((current) => ({
+          ...current,
+          [activeChatSessionId]: (current[activeChatSessionId] ?? []).filter(
+            (message) => message.id !== optimisticMessageId
+          ),
+        }));
+        setChatError(sendRes.error);
+        return;
+      }
+      const messagesRes = await currentApi.listMessages(activeChatSessionId);
+      if (!messagesRes.ok) {
+        setChatMessagesBySession((current) => ({
+          ...current,
+          [activeChatSessionId]: (current[activeChatSessionId] ?? []).map((message) =>
+            message.id === optimisticMessageId
+              ? { ...message, id: sendRes.data.messageId }
+              : message
+          ),
+        }));
+        setChatError(messagesRes.error);
+        return;
+      }
+      setChatMessagesBySession((current) => ({
+        ...current,
+        [activeChatSessionId]: messagesRes.data.items.map((msg) => ({
+          id: msg.id,
+          role:
+            msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+          content: msg.content,
+          ts: msg.ts,
+        })),
+      }));
+      if (!activeSession?.title || activeSession.title === "New conversation") {
+        const autoTitle = text.slice(0, 48);
+        await updateChatSession(activeChatSessionId, {
+          title: autoTitle,
+          metadata: activeSession?.metadata ?? null,
+        });
+      }
+      setChatError(null);
+    },
+    [
+      activeChatSessionId,
+      chatSessions,
+      daemonStatus.ready,
+      updateChatSession,
+    ]
+  );
+
   const persistOnboarding = useCallback((next: OnboardingData) => {
     setOnboarding(next);
-    localStorage.setItem(ONBOARDING_KEY, JSON.stringify(next));
+    writeOnboarding(next);
   }, []);
 
   const completeOnboarding = useCallback(() => {
@@ -247,6 +806,34 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveAiProvider(provider);
       if (!res.ok) throw new Error(res.error);
+    },
+    [api]
+  );
+
+  const saveProfile = useCallback(
+    async (nextProfile: UserProfile) => {
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
+      const res = await api.saveProfile(nextProfile);
+      if (!res.ok) throw new Error(res.error);
+      setProfile(res.data.profile);
+      setOnboarding((current) => {
+        const next = {
+          ...current,
+          profile: res.data.profile,
+        };
+        writeOnboarding(next);
+        return next;
+      });
+    },
+    [api]
+  );
+
+  const saveAiModelDefaults = useCallback(
+    async (defaults: AiModelDefaults) => {
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
+      const res = await api.saveAiModelDefaults(defaults);
+      if (!res.ok) throw new Error(res.error);
+      setAiModelDefaults(res.data.defaults);
     },
     [api]
   );
@@ -332,9 +919,19 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshDaemonStatus, refreshData, runDiagnosticsNow]);
 
+  useEffect(() => {
+    if (!api || !daemonStatus.ready) return;
+    void loadProfileAndModels(api);
+    void refreshChatSessions();
+  }, [api, daemonStatus.ready, loadProfileAndModels, refreshChatSessions]);
+
   const pendingApprovals = useMemo(
     () => approvals.filter((a) => a.status === "pending"),
     [approvals]
+  );
+  const chatMessages = useMemo(
+    () => (activeChatSessionId ? chatMessagesBySession[activeChatSessionId] ?? [] : []),
+    [activeChatSessionId, chatMessagesBySession]
   );
 
   const value = useMemo<OpenCorpoContextValue>(
@@ -351,13 +948,29 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       tools,
       diagnostics,
       onboarding,
+      profile,
+      aiModelDefaults,
       gmailStatus,
       pendingApprovals,
+      chatSessions,
+      activeChatSessionId,
+      chatMessages,
+      chatLoading,
+      chatError,
       api,
       refreshData,
       refreshDaemonStatus,
       persistOnboarding,
       completeOnboarding,
+      saveProfile,
+      saveAiModelDefaults,
+      refreshChatSessions,
+      createChatSession,
+      updateChatSession,
+      deleteChatSession,
+      reorderChatSessions,
+      selectChatSession,
+      sendChatMessage,
       saveGmailToken,
       saveAiKey,
       saveAiProvider,
@@ -383,13 +996,29 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       tools,
       diagnostics,
       onboarding,
+      profile,
+      aiModelDefaults,
       gmailStatus,
       pendingApprovals,
+      chatSessions,
+      activeChatSessionId,
+      chatMessages,
+      chatLoading,
+      chatError,
       api,
       refreshData,
       refreshDaemonStatus,
       persistOnboarding,
       completeOnboarding,
+      saveProfile,
+      saveAiModelDefaults,
+      refreshChatSessions,
+      createChatSession,
+      updateChatSession,
+      deleteChatSession,
+      reorderChatSessions,
+      selectChatSession,
+      sendChatMessage,
       saveGmailToken,
       saveAiKey,
       saveAiProvider,
@@ -401,6 +1030,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       runDiagnosticsNow,
       runRepair,
       restartDaemon,
+      chatMessagesBySession,
     ]
   );
 

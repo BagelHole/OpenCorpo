@@ -51,6 +51,7 @@ const runtimeState = {
 let daemonProcess = null;
 let daemonRestartTimer = null;
 let daemonRestartAttempts = 0;
+let mainWindow = null;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -67,8 +68,29 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  mainWindow = win;
 
   registerZoomShortcuts(win);
+
+  win.on("closed", () => {
+    mainWindow = null;
+  });
+
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(
+      `[renderer] did-fail-load code=${errorCode} description=${errorDescription} url=${validatedURL}`
+    );
+  });
+
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer] render-process-gone reason=${details.reason} code=${details.exitCode}`);
+  });
+
+  win.webContents.on("console-message", (_event, level, message) => {
+    if (level >= 2) {
+      console.error(`[renderer:console] ${message}`);
+    }
+  });
 
   win.once("ready-to-show", () => {
     win.show();
