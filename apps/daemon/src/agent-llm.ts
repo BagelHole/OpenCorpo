@@ -7,7 +7,7 @@ import type { DbHandle } from "./db";
 import { getSecretValue } from "./secrets";
 
 const DEFAULT_GATEWAY_MODEL = "anthropic/claude-sonnet-4.5";
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-5.2-chat-latest";
 
 const SYSTEM_PROMPT = `You are OpenCorpo, a self-configuring business operating system. You help users manage approvals, jobs, audit logs, tools, and plugins. You can also propose changes to add new tools, jobs, and workflows.
 

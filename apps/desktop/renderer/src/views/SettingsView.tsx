@@ -141,7 +141,11 @@ export function SettingsView({
         <CardContent className="space-y-3 text-sm">
           <HealthRow label="Daemon" ok={daemonStatus.running} value={daemonStatus.running ? "Running" : "Stopped"} />
           <HealthRow label="Ready" ok={daemonStatus.ready} value={daemonStatus.ready ? "Yes" : "No"} />
-          <HealthRow label="API" ok={daemonStatus.ready} value={apiBase || "—"} />
+          <HealthRow
+            label="API"
+            ok={daemonStatus.ready}
+            value={daemonStatus.apiBase || apiBase || "—"}
+          />
           <HealthRow label="Token" ok={daemonStatus.hasToken} value={daemonStatus.hasToken ? "Set" : "Missing"} />
           {daemonStatus.lastError && (
             <div className="rounded-lg bg-[var(--oc-danger-bg)] px-3 py-2 text-xs text-[var(--oc-danger)]">

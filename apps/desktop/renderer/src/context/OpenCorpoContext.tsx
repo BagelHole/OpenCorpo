@@ -144,7 +144,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
 
   const api = useMemo(() => {
     const instance =
-      apiBase && launchToken
+      launchToken
         ? new OpenCorpoApi(apiBase, () => tokenRef.current)
         : null;
     apiRef.current = instance;
@@ -160,13 +160,14 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     }
     try {
       const runtime = await window.opencorpo.daemon.getRuntimeConfig();
-      const base = runtime.apiBase || `http://127.0.0.1:3555`;
+      // `runtime.apiBase` can be intentionally empty in dev to use the Vite proxy.
+      const base = runtime.apiBase ?? `http://127.0.0.1:3555`;
       setApiBase(base);
       setLaunchToken(runtime.launchToken);
       const status = await window.opencorpo.daemon.getStatus();
       setDaemonStatus({
         ...status,
-        apiBase: base,
+        apiBase: status.apiBase || `http://127.0.0.1:3555`,
       });
       return status;
     } catch (e) {
@@ -220,7 +221,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
 
   const saveGmailToken = useCallback(
     async (token: string) => {
-      if (!api) return;
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveGmailToken(token);
       if (!res.ok) throw new Error(res.error);
       await refreshData();
@@ -230,7 +231,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
 
   const saveAiKey = useCallback(
     async (key: string) => {
-      if (!api) return;
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveAiKey(key, onboarding.aiProvider);
       if (!res.ok) throw new Error(res.error);
       if (window.opencorpo?.daemon) {
@@ -243,7 +244,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
 
   const saveAiProvider = useCallback(
     async (provider: string) => {
-      if (!api) return;
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveAiProvider(provider);
       if (!res.ok) throw new Error(res.error);
     },
@@ -257,7 +258,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, [api]);
 
   const getGmailOauthStart = useCallback(async () => {
-    if (!api) return { ok: false, error: "Not connected" };
+    if (!api) return { ok: false, error: "API client is not ready yet. Please try again." };
     const res = await api.getGmailOauthStart();
     return res.ok ? res.data : { ok: false, error: res.error };
   }, [api]);
