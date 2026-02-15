@@ -89,6 +89,11 @@ attachEventBroadcast(db);
 
 const app = new Elysia();
 const daemonPort = Number(process.env.OPENCORPO_PORT || 3555);
+const corsHeaders: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+  "access-control-allow-headers": "authorization,content-type,x-oc-session"
+};
 
 function allCapabilities() {
   return Array.from(
@@ -119,6 +124,15 @@ async function rebuildRuntimeState() {
 
 function asObject(body: unknown) {
   return typeof body === "object" && body ? (body as Record<string, unknown>) : {};
+}
+
+function normalizeSecretInput(value: string) {
+  return value
+    // Remove zero-width chars sometimes introduced by clipboard/HTML copy.
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    // Drop surrounding single/double quotes if present.
+    .replace(/^['"]+|['"]+$/g, "");
 }
 
 function parseApprovalMetadata(raw: string | null) {
@@ -193,11 +207,18 @@ async function exchangeGoogleCodeForToken(
   return { ok: true };
 }
 
-app.onBeforeHandle((ctx) => {
-  ctx.set.headers["access-control-allow-origin"] = "*";
-  ctx.set.headers["access-control-allow-methods"] = "GET,POST,PUT,DELETE,OPTIONS";
-  ctx.set.headers["access-control-allow-headers"] =
-    "authorization,content-type,x-oc-session";
+app.options("/*", ({ set }) => {
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    set.headers[key] = value;
+  }
+  set.status = 204;
+  return "";
+});
+
+app.onRequest((ctx) => {
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    ctx.set.headers[key] = value;
+  }
   if (ctx.request.method === "OPTIONS") {
     ctx.set.status = 204;
     return "";
@@ -374,12 +395,6 @@ app.post("/chat/stream", async ({ body }) => {
     controlPlaneRoot: controlPlane.root,
     workspaceRoot,
     handlerNames: Array.from(toolRegistry.handlers.keys())
-  };
-
-  const corsHeaders: Record<string, string> = {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,x-oc-session"
   };
 
   const result = await streamAgentWithLLM(messages, agentContext);
@@ -864,7 +879,8 @@ app.get("/secrets/ai-key/status", () => {
 });
 app.post("/secrets/ai-key", ({ body }) => {
   const payload = asObject(body);
-  const value = typeof payload.value === "string" ? payload.value.trim() : "";
+  const value =
+    typeof payload.value === "string" ? normalizeSecretInput(payload.value) : "";
   const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
   if (!value) return { ok: false, error: "value_required" };
   setSecretRef(db, { name: "ai.api_key", value });
@@ -875,6 +891,17 @@ app.post("/secrets/ai-key", ({ body }) => {
   // Make key available immediately for this daemon process.
   process.env.AI_GATEWAY_API_KEY = value;
   process.env.VERCEL_AI_API_KEY = value;
+  return { ok: true };
+});
+
+app.post("/secrets/ai-provider", ({ body }) => {
+  const payload = asObject(body);
+  const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
+  if (!provider) return { ok: false, error: "provider_required" };
+  const valid = ["openai", "anthropic", "local", "gateway"];
+  if (!valid.includes(provider)) return { ok: false, error: "invalid_provider" };
+  setSecretRef(db, { name: "ai.provider", value: provider, provider: "local_file" });
+  process.env.OPENCORPO_AI_PROVIDER = provider;
   return { ok: true };
 });
 app.get("/stream", ({ request, set }) => {

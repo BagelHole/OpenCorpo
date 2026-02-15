@@ -17,6 +17,7 @@ type Props = {
   completeOnboarding: () => void;
   saveGmailToken: (token: string) => Promise<void>;
   saveAiKey: (key: string) => Promise<void>;
+  saveAiProvider?: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
 };
@@ -28,6 +29,7 @@ export function OnboardingWizard({
   completeOnboarding,
   saveGmailToken,
   saveAiKey,
+  saveAiProvider,
   checkAiKeyConfigured,
   getGmailOauthStart
 }: Props) {
@@ -49,8 +51,15 @@ export function OnboardingWizard({
     []
   );
 
-  const saveProvider = (provider: OnboardingData["aiProvider"]) => {
+  const saveProvider = async (provider: OnboardingData["aiProvider"]) => {
     persistOnboarding({ ...onboarding, aiProvider: provider });
+    if (saveAiProvider) {
+      try {
+        await saveAiProvider(provider);
+      } catch {
+        // Daemon may not be ready during onboarding
+      }
+    }
   };
 
   useEffect(() => {
@@ -119,13 +128,13 @@ export function OnboardingWizard({
   };
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col justify-center px-6 py-10">
-      <Card className="border border-slate-200 shadow-sm">
-        <CardHeader className="space-y-3 border-b border-slate-200">
-          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+    <div className="mx-auto flex w-full max-w-2xl flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <Card>
+        <CardHeader className="space-y-3 border-b border-[var(--oc-border)]">
+          <div className="text-xs font-semibold uppercase tracking-widest text-[var(--oc-ink-muted)]">
             OpenCorpo Setup
           </div>
-          <CardTitle className="text-2xl">Let&apos;s make this effortless</CardTitle>
+          <CardTitle className="text-xl sm:text-2xl">Let&apos;s make this effortless</CardTitle>
           <div className="flex flex-wrap gap-2 text-xs">
             {steps.map((label, index) => (
               <Badge key={label} tone={index <= step ? "success" : "default"}>
@@ -136,7 +145,7 @@ export function OnboardingWizard({
         </CardHeader>
         <CardContent className="space-y-6 pt-6">
           {step === 0 && (
-            <div className="space-y-4 text-sm text-slate-600">
+            <div className="space-y-4 text-sm text-[var(--oc-ink-muted)]">
               <p>
                 OpenCorpo runs locally on your desktop, keeps your data private, and
                 lets the agent handle your repetitive work safely.
@@ -150,7 +159,7 @@ export function OnboardingWizard({
 
           {step === 1 && (
             <div className="space-y-4 text-sm">
-              <p className="text-slate-600">
+              <p className="text-[var(--oc-ink-muted)]">
                 Pick your default AI provider. You can change this later in settings.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -163,11 +172,11 @@ export function OnboardingWizard({
                 ).map(([value, label]) => (
                   <button
                     key={value}
-                    onClick={() => saveProvider(value)}
-                    className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                    onClick={() => void saveProvider(value)}
+                    className={`rounded-lg border px-4 py-3 text-left text-sm transition ${
                       onboarding.aiProvider === value
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                        ? "border-[var(--oc-accent)] bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                        : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)] hover:border-[var(--oc-border-strong)]"
                     }`}
                   >
                     {label}
@@ -179,7 +188,7 @@ export function OnboardingWizard({
 
           {step === 2 && (
             <div className="space-y-4 text-sm">
-              <p className="text-slate-600">
+              <p className="text-[var(--oc-ink-muted)]">
                 Enter your API key for {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "your local/BYOK provider"}. You can change this later in settings.
               </p>
               <div className="flex items-center gap-3">
@@ -189,14 +198,14 @@ export function OnboardingWizard({
                 </Badge>
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-[0.15em] text-slate-500">
+                <label className="text-xs font-medium uppercase tracking-wider text-[var(--oc-ink-muted)]">
                   API key
                 </label>
                 <input
                   type="password"
                   value={aiKeyInput}
                   onChange={(event) => setAiKeyInput(event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
                   placeholder="Paste your API key"
                 />
               </div>
@@ -205,32 +214,32 @@ export function OnboardingWizard({
                   {saving ? "Saving..." : "Save key"}
                 </Button>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--oc-ink-muted)]">
                 {onboarding.aiProvider === "local" ? "You can skip this step for local/BYOK setups." : "Required for AI-powered chat."}
               </p>
             </div>
           )}
 
           {step === 3 && (
-            <div className="space-y-4 text-sm text-slate-600">
+            <div className="space-y-4 text-sm text-[var(--oc-ink-muted)]">
               <div className="flex items-center gap-3">
                 <span>Gmail status:</span>
                 <Badge tone={gmailConnected ? "success" : "warning"}>
                   {gmailConnected ? "Connected" : "Not connected"}
                 </Badge>
               </div>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-[var(--oc-ink-muted)]">
                 This step is optional. You can skip now and connect Gmail later in
                 Settings.
               </p>
               <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-[0.15em] text-slate-500">
+                <label className="text-xs font-medium uppercase tracking-wider text-[var(--oc-ink-muted)]">
                   Gmail access token (quick path)
                 </label>
                 <input
                   value={tokenInput}
                   onChange={(event) => setTokenInput(event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
                   placeholder="Paste access token"
                 />
               </div>
@@ -246,7 +255,7 @@ export function OnboardingWizard({
           )}
 
           {step === 4 && (
-            <div className="space-y-3 text-sm text-slate-600">
+            <div className="space-y-3 text-sm text-[var(--oc-ink-muted)]">
               <p>Everything is ready. OpenCorpo will now launch your clean workspace.</p>
               <ul className="space-y-1">
                 <li>- Chat is your main workspace.</li>
@@ -256,7 +265,7 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {localError && <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-700">{localError}</div>}
+          {localError && <div className="rounded-lg bg-[var(--oc-warning-bg)] px-3 py-2 text-sm text-[var(--oc-warning)]">{localError}</div>}
 
           <div className="flex items-center justify-between">
             <Button
