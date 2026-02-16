@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  AiProviderCatalog,
   Approval,
   AuditEntry,
   Job,
@@ -76,6 +77,11 @@ export type GmailStatus = {
   connected: boolean;
   tokenSource: string | null;
   refreshConfigured: boolean;
+};
+
+const EMPTY_AI_PROVIDER_CATALOG: AiProviderCatalog = {
+  defaultProvider: null,
+  providers: [],
 };
 
 const ONBOARDING_KEY = "opencorpo_onboarding_v2";
@@ -295,6 +301,7 @@ type OpenCorpoContextValue = {
   profile: UserProfile;
   aiModelDefaults: AiModelDefaults;
   gmailStatus: GmailStatus;
+  aiProviderCatalog: AiProviderCatalog;
   uiConfig: UiConfig;
   pendingApprovals: Approval[];
   chatSessions: ChatSessionRecord[];
@@ -375,6 +382,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     tokenSource: null,
     refreshConfigured: false,
   });
+  const [aiProviderCatalog, setAiProviderCatalog] = useState<AiProviderCatalog>(
+    EMPTY_AI_PROVIDER_CATALOG
+  );
   const [uiConfig, setUiConfig] = useState<UiConfig>(DEFAULT_UI_CONFIG);
   const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(readChatSessionsCache);
   const [activeChatSessionId, setActiveChatSessionId] = useState<number | null>(
@@ -464,9 +474,10 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProfileAndModels = useCallback(async (client: OpenCorpoApi) => {
-    const [profileRes, modelRes] = await Promise.all([
+    const [profileRes, modelRes, providerRes] = await Promise.all([
       client.getProfile(),
       client.getAiModelDefaults(),
+      client.getAiProviderCatalog(),
     ]);
     if (profileRes.ok) {
       setProfile(profileRes.data.profile);
@@ -481,6 +492,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     }
     if (modelRes.ok) {
       setAiModelDefaults(modelRes.data.defaults);
+    }
+    if (providerRes.ok) {
+      setAiProviderCatalog(providerRes.data);
     }
   }, []);
 
@@ -837,6 +851,8 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveAiKey(key, onboarding.aiProvider);
       if (!res.ok) throw new Error(res.error);
+      const providerRes = await api.getAiProviderCatalog();
+      if (providerRes.ok) setAiProviderCatalog(providerRes.data);
       if (window.opencorpo?.daemon) {
         await window.opencorpo.daemon.restart();
         await refreshDaemonStatus();
@@ -850,6 +866,8 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       if (!api) throw new Error("API client is not ready yet. Please try again.");
       const res = await api.saveAiProvider(provider);
       if (!res.ok) throw new Error(res.error);
+      const providerRes = await api.getAiProviderCatalog();
+      if (providerRes.ok) setAiProviderCatalog(providerRes.data);
     },
     [api]
   );
@@ -878,6 +896,8 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       const res = await api.saveAiModelDefaults(defaults);
       if (!res.ok) throw new Error(res.error);
       setAiModelDefaults(res.data.defaults);
+      const providerRes = await api.getAiProviderCatalog();
+      if (providerRes.ok) setAiProviderCatalog(providerRes.data);
     },
     [api]
   );
@@ -995,6 +1015,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       gmailStatus,
+      aiProviderCatalog,
       uiConfig,
       pendingApprovals,
       chatSessions,
@@ -1044,6 +1065,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       gmailStatus,
+      aiProviderCatalog,
       uiConfig,
       pendingApprovals,
       chatSessions,

@@ -81,6 +81,14 @@ if (existingAiGatewayApiKey) {
   process.env.AI_GATEWAY_API_KEY = existingAiGatewayApiKey;
   process.env.VERCEL_AI_API_KEY = existingAiGatewayApiKey;
 }
+const existingOpenAiApiKey = getSecretValue(db, "ai.api_key.openai");
+if (existingOpenAiApiKey) {
+  process.env.OPENAI_API_KEY = existingOpenAiApiKey;
+}
+const existingAnthropicApiKey = getSecretValue(db, "ai.api_key.anthropic");
+if (existingAnthropicApiKey) {
+  process.env.ANTHROPIC_API_KEY = existingAnthropicApiKey;
+}
 const existingAiProvider = getSecretValue(db, "ai.provider");
 if (existingAiProvider) {
   process.env.OPENCORPO_AI_PROVIDER = existingAiProvider.trim().toLowerCase();
@@ -151,6 +159,144 @@ function normalizeSecretInput(value: string) {
     .trim()
     // Drop surrounding single/double quotes if present.
     .replace(/^['"]+|['"]+$/g, "");
+}
+
+type AiModelDefaults = {
+  anthropic: string;
+  openai: string;
+  local: string;
+};
+
+function readAiModelDefaults(): AiModelDefaults {
+  const raw = getSecretValue(db, "ai.model_defaults");
+  if (!raw) {
+    return {
+      anthropic: "",
+      openai: "",
+      local: ""
+    };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      anthropic: typeof parsed.anthropic === "string" ? parsed.anthropic.trim() : "",
+      openai: typeof parsed.openai === "string" ? parsed.openai.trim() : "",
+      local: typeof parsed.local === "string" ? parsed.local.trim() : ""
+    };
+  } catch {
+    return {
+      anthropic: "",
+      openai: "",
+      local: ""
+    };
+  }
+}
+
+function normalizeProviderName(value: string | null | undefined): string | null {
+  const next = (value ?? "").trim().toLowerCase();
+  if (!next) return null;
+  if (next === "openai" || next === "anthropic" || next === "local" || next === "gateway") {
+    return next;
+  }
+  return null;
+}
+
+function dedupeModels(models: string[], defaultModel: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+  push(defaultModel);
+  for (const model of models) push(model);
+  return out;
+}
+
+function getProviderApiKey(
+  provider: "openai" | "anthropic" | "gateway",
+  preferredProvider: string | null,
+  legacyKey: string
+) {
+  const inferredLegacyProvider = legacyKey.startsWith("sk-ant-")
+    ? "anthropic"
+    : legacyKey.startsWith("sk-")
+      ? "openai"
+      : legacyKey
+        ? "gateway"
+        : null;
+  if (provider === "openai") {
+    return (
+      process.env.OPENAI_API_KEY ??
+      getSecretValue(db, "ai.api_key.openai") ??
+      (preferredProvider === "openai" || inferredLegacyProvider === "openai" ? legacyKey : "")
+    );
+  }
+  if (provider === "anthropic") {
+    return (
+      process.env.ANTHROPIC_API_KEY ??
+      getSecretValue(db, "ai.api_key.anthropic") ??
+      (preferredProvider === "anthropic" || inferredLegacyProvider === "anthropic"
+        ? legacyKey
+        : "")
+    );
+  }
+  return (
+    process.env.AI_GATEWAY_API_KEY ??
+    process.env.VERCEL_AI_API_KEY ??
+    getSecretValue(db, "ai.api_key.gateway") ??
+    (preferredProvider !== "openai" &&
+    preferredProvider !== "anthropic" &&
+    inferredLegacyProvider !== "openai" &&
+    inferredLegacyProvider !== "anthropic"
+      ? legacyKey
+      : "")
+  );
+}
+
+async function listOpenAiModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      }
+    });
+    if (!res.ok) return [];
+    const payload = (await res.json()) as {
+      data?: Array<{ id?: string }>;
+    };
+    if (!Array.isArray(payload.data)) return [];
+    return payload.data
+      .map((item) => (typeof item.id === "string" ? item.id.trim() : ""))
+      .filter((id) => id.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+async function listAnthropicModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      }
+    });
+    if (!res.ok) return [];
+    const payload = (await res.json()) as {
+      data?: Array<{ id?: string }>;
+    };
+    if (!Array.isArray(payload.data)) return [];
+    return payload.data
+      .map((item) => (typeof item.id === "string" ? item.id.trim() : ""))
+      .filter((id) => id.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
 }
 
 function parseApprovalMetadata(raw: string | null) {
@@ -971,14 +1117,101 @@ app.get("/secrets", ({ query }) => {
 app.get("/secrets/ai-key/status", () => {
   const hasKey = Boolean(
     process.env.AI_GATEWAY_API_KEY ??
+      process.env.OPENAI_API_KEY ??
+      process.env.ANTHROPIC_API_KEY ??
       process.env.VERCEL_AI_API_KEY ??
-      getSecretValue(db, "ai.api_key")
+      getSecretValue(db, "ai.api_key") ??
+      getSecretValue(db, "ai.api_key.openai") ??
+      getSecretValue(db, "ai.api_key.anthropic") ??
+      getSecretValue(db, "ai.api_key.gateway")
   );
   const provider =
     process.env.OPENCORPO_AI_PROVIDER ??
     getSecretValue(db, "ai.provider") ??
     null;
   return { ok: true, configured: hasKey, provider };
+});
+
+app.get("/secrets/ai/providers", async () => {
+  const defaults = readAiModelDefaults();
+  const preferredProvider = normalizeProviderName(
+    process.env.OPENCORPO_AI_PROVIDER ?? getSecretValue(db, "ai.provider")
+  );
+  const legacyKey = (
+    process.env.AI_GATEWAY_API_KEY ??
+    process.env.VERCEL_AI_API_KEY ??
+    getSecretValue(db, "ai.api_key") ??
+    ""
+  ).trim();
+  const openAiKey = getProviderApiKey("openai", preferredProvider, legacyKey).trim();
+  const anthropicKey = getProviderApiKey("anthropic", preferredProvider, legacyKey).trim();
+  const gatewayKey = getProviderApiKey("gateway", preferredProvider, legacyKey).trim();
+
+  const [openAiModels, anthropicModels] = await Promise.all([
+    openAiKey ? listOpenAiModels(openAiKey) : Promise.resolve([]),
+    anthropicKey ? listAnthropicModels(anthropicKey) : Promise.resolve([])
+  ]);
+
+  const providers = [
+    {
+      id: "openai",
+      label: "OpenAI",
+      configured: Boolean(openAiKey),
+      defaultModel: defaults.openai,
+      models: dedupeModels(openAiModels, defaults.openai)
+    },
+    {
+      id: "anthropic",
+      label: "Anthropic",
+      configured: Boolean(anthropicKey),
+      defaultModel: defaults.anthropic,
+      models: dedupeModels(anthropicModels, defaults.anthropic)
+    },
+    {
+      id: "local",
+      label: "Local / BYOK",
+      configured:
+        preferredProvider === "local" || Boolean(defaults.local) || Boolean(gatewayKey),
+      defaultModel: defaults.local,
+      models: dedupeModels(
+        (process.env.OPENCORPO_LOCAL_MODELS ?? "")
+          .split(",")
+          .map((model) => model.trim())
+          .filter(Boolean),
+        defaults.local
+      )
+    },
+    {
+      id: "gateway",
+      label: "Gateway",
+      configured: Boolean(gatewayKey),
+      defaultModel: "",
+      models: []
+    }
+  ].filter((provider) => provider.configured);
+
+  const defaultProvider =
+    preferredProvider && providers.some((provider) => provider.id === preferredProvider)
+      ? preferredProvider
+      : providers[0]?.id ?? null;
+
+  return {
+    ok: true,
+    defaultProvider,
+    providers: providers.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      defaultModel:
+        provider.defaultModel ||
+        provider.models[0] ||
+        (provider.id === "openai"
+          ? "gpt-5.2-chat-latest"
+          : provider.id === "local"
+            ? "anthropic/claude-sonnet-4.5"
+            : ""),
+      models: provider.models
+    }))
+  };
 });
 
 app.get("/profile", () => {
@@ -1036,37 +1269,7 @@ app.post("/profile", ({ body }) => {
 });
 
 app.get("/secrets/ai-model-defaults", () => {
-  const raw = getSecretValue(db, "ai.model_defaults");
-  if (!raw) {
-    return {
-      ok: true,
-      defaults: {
-        anthropic: "",
-        openai: "",
-        local: ""
-      }
-    };
-  }
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      ok: true,
-      defaults: {
-        anthropic: typeof parsed.anthropic === "string" ? parsed.anthropic : "",
-        openai: typeof parsed.openai === "string" ? parsed.openai : "",
-        local: typeof parsed.local === "string" ? parsed.local : ""
-      }
-    };
-  } catch {
-    return {
-      ok: true,
-      defaults: {
-        anthropic: "",
-        openai: "",
-        local: ""
-      }
-    };
-  }
+  return { ok: true, defaults: readAiModelDefaults() };
 });
 
 app.post("/secrets/ai-model-defaults", ({ body }) => {
@@ -1089,16 +1292,27 @@ app.post("/secrets/ai-key", ({ body }) => {
   const payload = asObject(body);
   const value =
     typeof payload.value === "string" ? normalizeSecretInput(payload.value) : "";
-  const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
+  const provider = normalizeProviderName(
+    typeof payload.provider === "string" ? payload.provider : ""
+  );
   if (!value) return { ok: false, error: "value_required" };
   setSecretRef(db, { name: "ai.api_key", value });
   if (provider) {
+    if (provider === "openai" || provider === "anthropic" || provider === "gateway") {
+      setSecretRef(db, { name: `ai.api_key.${provider}`, value });
+    }
     setSecretRef(db, { name: "ai.provider", value: provider });
     process.env.OPENCORPO_AI_PROVIDER = provider;
   }
   // Make key available immediately for this daemon process.
   process.env.AI_GATEWAY_API_KEY = value;
   process.env.VERCEL_AI_API_KEY = value;
+  if (provider === "openai") {
+    process.env.OPENAI_API_KEY = value;
+  }
+  if (provider === "anthropic") {
+    process.env.ANTHROPIC_API_KEY = value;
+  }
   return { ok: true };
 });
 

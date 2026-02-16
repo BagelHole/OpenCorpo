@@ -32,6 +32,7 @@ const TAB_COLOR_ALIASES: Record<string, string> = {
   amber: "#fbbf24",
   rose: "#fb7185",
 };
+const LAST_CHAT_SELECTION_KEY = "opencorpo_last_chat_selection_v1";
 
 function normalizeHexColor(value: string | undefined): string | null {
   if (!value) return null;
@@ -62,6 +63,37 @@ function withAlpha(hex: string, alpha: number): string {
 function parseProvider(value: string): "anthropic" | "openai" | "local" | undefined {
   if (value === "anthropic" || value === "openai" || value === "local") return value;
   return undefined;
+}
+
+function readLastChatSelection(): { provider?: "anthropic" | "openai" | "local"; model?: string } {
+  try {
+    const raw = localStorage.getItem(LAST_CHAT_SELECTION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { provider?: string; model?: string };
+    return {
+      provider: parseProvider(parsed.provider ?? ""),
+      model: typeof parsed.model === "string" ? parsed.model.trim() : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writeLastChatSelection(input: {
+  provider?: "anthropic" | "openai" | "local";
+  model?: string;
+}) {
+  try {
+    localStorage.setItem(
+      LAST_CHAT_SELECTION_KEY,
+      JSON.stringify({
+        provider: input.provider,
+        model: input.model?.trim() || undefined,
+      })
+    );
+  } catch {
+    // ignore storage write errors
+  }
 }
 
 export function ChatView() {
@@ -108,6 +140,45 @@ export function ChatView() {
       y: Math.max(8, Math.min(tabMenu.y, maxY)),
     };
   }, [showColorPicker, showEmojiPicker, tabMenu]);
+  const configuredProviders = useMemo(
+    () =>
+      state.aiProviderCatalog.providers.filter(
+        (provider) =>
+          provider.id === "anthropic" || provider.id === "openai" || provider.id === "local"
+      ),
+    [state.aiProviderCatalog.providers]
+  );
+  const defaultProviderId = useMemo(() => {
+    const preferred = state.aiProviderCatalog.defaultProvider;
+    if (preferred && configuredProviders.some((provider) => provider.id === preferred)) {
+      return preferred;
+    }
+    return configuredProviders[0]?.id ?? "";
+  }, [configuredProviders, state.aiProviderCatalog.defaultProvider]);
+  const selectedProviderId = useMemo(() => {
+    const override = activeSession?.metadata.provider;
+    if (override && configuredProviders.some((provider) => provider.id === override)) {
+      return override;
+    }
+    return defaultProviderId;
+  }, [activeSession?.metadata.provider, configuredProviders, defaultProviderId]);
+  const selectedProviderConfig = useMemo(
+    () => configuredProviders.find((provider) => provider.id === selectedProviderId) ?? null,
+    [configuredProviders, selectedProviderId]
+  );
+  const providerDefaultModel = selectedProviderConfig?.defaultModel ?? "";
+  const selectableModels = useMemo(() => {
+    if (!selectedProviderConfig) return [];
+    const models = new Set<string>(selectedProviderConfig.models);
+    if (providerDefaultModel) models.add(providerDefaultModel);
+    return Array.from(models);
+  }, [providerDefaultModel, selectedProviderConfig]);
+  const selectedModelValue = useMemo(() => {
+    const override = activeSession?.metadata.model?.trim() ?? "";
+    if (override) return override;
+    if (providerDefaultModel) return providerDefaultModel;
+    return selectableModels[0] ?? "";
+  }, [activeSession?.metadata.model, providerDefaultModel, selectableModels]);
 
   useEffect(() => {
     if (!state.daemonStatus.ready) return;
@@ -136,8 +207,26 @@ export function ChatView() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTabMenu(null);
     };
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (tabMenuRef.current && target && !tabMenuRef.current.contains(target)) {
+        setTabMenu(null);
+      }
+    };
+    const onContextMenu = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (tabMenuRef.current && target && !tabMenuRef.current.contains(target)) {
+        setTabMenu(null);
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("contextmenu", onContextMenu);
+    };
   }, [tabMenu]);
 
   const canSend = state.daemonStatus.ready && Boolean(state.activeChatSessionId) && !sending;
@@ -243,16 +332,10 @@ export function ChatView() {
     <div className="relative flex h-full min-h-0 flex-col">
       {tabMenuSession && tabMenuPosition && (
         <div
-          className="fixed inset-0 z-40"
-          onClick={() => setTabMenu(null)}
-          onContextMenu={(event) => event.preventDefault()}
+          ref={tabMenuRef}
+          className="fixed z-40 w-[320px] space-y-2 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2 shadow-xl"
+          style={{ left: tabMenuPosition.x, top: tabMenuPosition.y }}
         >
-          <div
-            ref={tabMenuRef}
-            className="absolute w-[320px] space-y-2 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2 shadow-xl"
-            style={{ left: tabMenuPosition.x, top: tabMenuPosition.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
             <input
               value={menuTitleDraft}
               onChange={(event) => setMenuTitleDraft(event.target.value)}
@@ -361,7 +444,6 @@ export function ChatView() {
             >
               Delete tab and history...
             </button>
-          </div>
         </div>
       )}
       <Card className="flex min-h-0 flex-1 flex-col">
@@ -441,12 +523,26 @@ export function ChatView() {
                 size="sm"
                 variant="secondary"
                 className="h-8 shrink-0 px-3 text-xs"
-                onClick={() =>
+                onClick={() => {
+                  const last = readLastChatSelection();
+                  const providerId =
+                    (last.provider &&
+                    configuredProviders.some((provider) => provider.id === last.provider)
+                      ? last.provider
+                      : parseProvider(selectedProviderId)) ?? undefined;
+                  const providerConfig = configuredProviders.find(
+                    (provider) => provider.id === providerId
+                  );
+                  const model =
+                    last.model?.trim() ||
+                    providerConfig?.defaultModel ||
+                    providerConfig?.models[0] ||
+                    undefined;
                   void state.createChatSession({
                     title: "New conversation",
-                    metadata: { emoji: "💬", color: "slate" },
-                  })
-                }
+                    metadata: { emoji: "💬", color: "slate", provider: providerId, model },
+                  });
+                }}
               >
                 New tab
               </Button>
@@ -531,6 +627,10 @@ export function ChatView() {
                 e.preventDefault();
                 const text = input.trim();
                 if (!text || !canSend) return;
+                writeLastChatSelection({
+                  provider: parseProvider(selectedProviderId),
+                  model: selectedModelValue || undefined,
+                });
                 setSending(true);
                 setInput("");
                 await state.sendChatMessage(text);
@@ -546,6 +646,10 @@ export function ChatView() {
                     e.preventDefault();
                     const text = input.trim();
                     if (!text || !canSend) return;
+                    writeLastChatSelection({
+                      provider: parseProvider(selectedProviderId),
+                      model: selectedModelValue || undefined,
+                    });
                     setSending(true);
                     setInput("");
                     void state.sendChatMessage(text).finally(() => setSending(false));
@@ -562,38 +666,81 @@ export function ChatView() {
                     {canSend ? "Press Enter to send." : "Connect daemon to chat."}
                   </span>
                   <select
-                    value={activeSession?.metadata.provider ?? ""}
+                    value={selectedProviderId}
                     onChange={(event) => {
                       if (!activeSession) return;
+                      const nextProvider = parseProvider(event.target.value);
+                      const nextDefaultModel =
+                        configuredProviders.find((provider) => provider.id === event.target.value)
+                          ?.defaultModel ?? "";
                       void state.updateChatSession(activeSession.id, {
                         title: activeSession.title,
                         metadata: {
                           ...activeSession.metadata,
-                          provider: parseProvider(event.target.value),
+                          provider: nextProvider,
+                          // If the model override was effectively the previous default,
+                          // clear it so provider default follows automatically.
+                          model:
+                            activeSession.metadata.model?.trim() &&
+                            activeSession.metadata.model.trim() !== providerDefaultModel &&
+                            activeSession.metadata.model.trim() !== nextDefaultModel
+                              ? activeSession.metadata.model
+                              : undefined,
                         },
+                      });
+                      writeLastChatSelection({
+                        provider: nextProvider,
+                        model:
+                          activeSession.metadata.model?.trim() &&
+                          activeSession.metadata.model.trim() !== providerDefaultModel &&
+                          activeSession.metadata.model.trim() !== nextDefaultModel
+                            ? activeSession.metadata.model.trim()
+                            : nextDefaultModel || undefined,
                       });
                     }}
                     className="h-8 rounded-md border border-[var(--oc-border)] bg-[var(--oc-bg)] px-2 text-xs text-[var(--oc-ink)] outline-none focus:border-[var(--oc-border-strong)] disabled:opacity-60"
-                    disabled={!activeSession}
+                    disabled={!activeSession || configuredProviders.length === 0}
                   >
-                    <option value="">Default provider</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="local">Local / BYOK</option>
+                    {configuredProviders.length === 0 ? (
+                      <option value="">No configured providers</option>
+                    ) : (
+                      configuredProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.label}
+                        </option>
+                      ))
+                    )}
                   </select>
-                  <input
-                    value={activeSession?.metadata.model ?? ""}
+                  <select
+                    value={selectedModelValue}
                     onChange={(event) => {
                       if (!activeSession) return;
+                      const next = event.target.value.trim();
                       void state.updateChatSession(activeSession.id, {
                         title: activeSession.title,
-                        metadata: { ...activeSession.metadata, model: event.target.value },
+                        metadata: {
+                          ...activeSession.metadata,
+                          model: next && next !== providerDefaultModel ? next : undefined,
+                        },
+                      });
+                      writeLastChatSelection({
+                        provider: parseProvider(selectedProviderId),
+                        model: next || undefined,
                       });
                     }}
                     className="h-8 w-[180px] rounded-md border border-[var(--oc-border)] bg-[var(--oc-bg)] px-2 text-xs text-[var(--oc-ink)] outline-none transition focus:border-[var(--oc-border-strong)] disabled:opacity-60"
-                    placeholder="Model override (optional)"
-                    disabled={!activeSession}
-                  />
+                    disabled={!activeSession || selectableModels.length === 0}
+                  >
+                    {selectableModels.length === 0 ? (
+                      <option value="">No models found</option>
+                    ) : (
+                      selectableModels.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </div>
                 <div className="flex gap-2">
                   <Button type="submit" size="sm" disabled={!canSend}>

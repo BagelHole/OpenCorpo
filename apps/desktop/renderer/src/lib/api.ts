@@ -5,6 +5,16 @@
 
 export type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
+export type AiProviderCatalog = {
+  defaultProvider: string | null;
+  providers: Array<{
+    id: string;
+    label: string;
+    defaultModel: string;
+    models: string[];
+  }>;
+};
+
 export class OpenCorpoApi {
   constructor(
     private baseUrl: string,
@@ -215,6 +225,10 @@ export class OpenCorpoApi {
 
   async saveAiProvider(provider: string) {
     return this.post<{ ok: boolean }>("/secrets/ai-provider", { provider });
+  }
+
+  async getAiProviderCatalog() {
+    return this.get<AiProviderCatalog>("/secrets/ai/providers");
   }
 
   async getProfile() {
