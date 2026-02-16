@@ -45,7 +45,7 @@ OpenCorpo is built so that:
 OpenCorpo consists of two local processes:
 
 1) Desktop app (Electron + React UI)
-   - chat, inbox, CRM, approvals, audit viewer
+   - chat, jobs, CRM, approvals, audit viewer
    - OAuth flows (Gmail)
    - system tray + lifecycle
    - starts and authenticates the daemon
@@ -60,7 +60,7 @@ Diagram:
 
 +---------------------------+
 |        Desktop UI         |  Electron
-|  - chat / inbox / crm     |
+|  - chat / jobs / crm      |
 |  - jobs / approvals       |
 |  - audit viewer           |
 |  - oauth                  |
@@ -116,6 +116,11 @@ AI is allowed to edit:
 
 - config/**/*.json
 - tools, policies, workflows, jobs, schemas, UI layouts
+
+Desktop navigation and base pages are now declarative in `config/ui/desktop.json` and validated by `config/schemas/ui.schema.json`.
+The AI can add sidebar items and simple JSON-based pages there without code changes.
+
+In desktop runtime, mutable user-specific Control Plane state is stored under the runtime data directory (`data/config` in local dev, app runtime folder in packaged builds). Do not commit those runtime JSON changes.
 
 Flow:
 
@@ -353,6 +358,7 @@ HTTP:
 - GET /tools/registry
 - GET /tools/runs
 - GET /tools/runs/:id
+- GET /ui/config
 - GET /plugins
 - GET /approvals
 - GET /approvals/:id

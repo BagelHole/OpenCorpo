@@ -1,5 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { AgentContext } from "./agent";
 import {
   buildApprovalsList,
@@ -31,6 +33,7 @@ import {
   proposeControlPlaneChange
 } from "./control-plane-changes";
 import { writeEvent } from "./events";
+import { runHttpGet, runWebSearch } from "./web-tools";
 
 const TOOL_SCHEMA_JSON = `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -46,6 +49,13 @@ const TOOL_SCHEMA_JSON = `{
   },
   "additionalProperties": true
 }`;
+
+function normalizeControlPlanePath(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!normalized.endsWith(".json")) return null;
+  if (normalized.includes("..")) return null;
+  return normalized;
+}
 
 export function buildAgentTools(context: AgentContext) {
   return {
@@ -167,6 +177,29 @@ export function buildAgentTools(context: AgentContext) {
       execute: async () => buildHelpText()
     }),
 
+    http_get: tool({
+      description:
+        "Fetch a public HTTP(S) URL. Use for docs pages and API responses. Private/local hosts are blocked.",
+      inputSchema: z.object({
+        url: z.string().url(),
+        timeout_ms: z.number().min(1000).max(20000).optional(),
+        max_bytes: z.number().min(512).max(100000).optional()
+      }),
+      execute: async ({ url, timeout_ms, max_bytes }) =>
+        runHttpGet({ url, timeoutMs: timeout_ms, maxBytes: max_bytes })
+    }),
+
+    web_search: tool({
+      description:
+        "Search the public web for a query and return top links/snippets. Use when user asks to look something up.",
+      inputSchema: z.object({
+        query: z.string().min(1),
+        max_results: z.number().min(1).max(10).optional()
+      }),
+      execute: async ({ query, max_results }) =>
+        runWebSearch({ query, maxResults: max_results })
+    }),
+
     list_available_handlers: tool({
       description:
         "List tool names that have plugin handlers. Use before adding a new tool to see which names can be used. Agent can add config for tools that match these handlers.",
@@ -183,6 +216,46 @@ export function buildAgentTools(context: AgentContext) {
         "Get the JSON schema for tool definitions. Use when creating a new tool via propose_config_change.",
       inputSchema: z.object({}),
       execute: async () => TOOL_SCHEMA_JSON
+    }),
+
+    get_ui_schema: tool({
+      description:
+        "Get the JSON schema for UI config files. Use before proposing ui/*.json changes.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          const schemaPath = resolve(context.controlPlaneRoot, "schemas/ui.schema.json");
+          return readFileSync(schemaPath, "utf-8");
+        } catch {
+          return "UI schema not found.";
+        }
+      }
+    }),
+
+    get_control_plane_json: tool({
+      description:
+        "Read an existing control-plane JSON file (e.g. ui/desktop.json, tools/x.json, jobs/x.json) before editing.",
+      inputSchema: z.object({
+        relative_path: z
+          .string()
+          .describe("Path under config root, e.g. ui/desktop.json")
+      }),
+      execute: async ({ relative_path }) => {
+        const normalized = normalizeControlPlanePath(relative_path);
+        if (!normalized) return "Invalid control-plane path. Must be a safe .json relative path.";
+        const absolutePath = resolve(context.controlPlaneRoot, normalized);
+        if (!absolutePath.startsWith(resolve(context.controlPlaneRoot))) {
+          return "Path traversal not allowed.";
+        }
+        if (!existsSync(absolutePath)) {
+          return `File not found: ${normalized}`;
+        }
+        try {
+          return readFileSync(absolutePath, "utf-8");
+        } catch (err) {
+          return `Failed to read ${normalized}: ${err instanceof Error ? err.message : "unknown_error"}`;
+        }
+      }
     }),
 
     list_control_plane_changes: tool({
@@ -202,7 +275,7 @@ export function buildAgentTools(context: AgentContext) {
 
     propose_config_change: tool({
       description:
-        "Propose a change to control plane config (tools, jobs, workflows, policy). Target: tools/*.json, jobs/*.json, workflows/*.json, policy.json. High-risk requires approval.",
+        "Propose a change to control plane config (tools, jobs, workflows, ui, policy). Target: tools/*.json, jobs/*.json, workflows/*.json, ui/*.json, policy.json. High-risk requires approval.",
       inputSchema: z.object({
         relative_path: z
           .string()
@@ -241,6 +314,9 @@ export function buildAgentTools(context: AgentContext) {
             return `Proposed control-plane change #${proposed.id} for ${normalized}. Approval #${approvalId} is required before apply.`;
           }
           const applied = applyControlPlaneChange(context.db, context.controlPlaneRoot, proposed.id);
+          if (applied.ok && context.onControlPlaneChanged) {
+            await context.onControlPlaneChanged();
+          }
           writeAudit(context.db, {
             actor: "agent",
             action: applied.ok ? "control_plane_change_applied" : "control_plane_change_failed",
@@ -303,6 +379,9 @@ export function buildAgentTools(context: AgentContext) {
       execute: async ({ change_id }) => {
         const applied = applyControlPlaneChange(context.db, context.controlPlaneRoot, change_id);
         if (!applied.ok) return `Failed: ${applied.error}`;
+        if (context.onControlPlaneChanged) {
+          await context.onControlPlaneChanged();
+        }
         return `Applied change #${change_id}.`;
       }
     })

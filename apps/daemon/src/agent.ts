@@ -46,6 +46,8 @@ export type AgentContext = {
   workspaceRoot: string;
   /** Tool names that have plugin handlers (for list_available_handlers) */
   handlerNames?: string[];
+  /** Called after control-plane changes are applied so runtime caches are refreshed. */
+  onControlPlaneChanged?: () => Promise<void>;
 };
 
 const LIST_LIMIT = 8;
@@ -648,6 +650,9 @@ async function executePlanStep(
     }
 
     const applied = applyControlPlaneChange(context.db, context.controlPlaneRoot, proposed.id);
+    if (applied.ok && context.onControlPlaneChanged) {
+      await context.onControlPlaneChanged();
+    }
     writeAudit(context.db, {
       actor: "agent",
       action: applied.ok ? "control_plane_change_applied" : "control_plane_change_failed",

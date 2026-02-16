@@ -62,6 +62,7 @@ import {
 } from "./code-change-proposals";
 import { runDiagnostics, listDiagnosticsRuns } from "./diagnostics";
 import { getSecretRef, getSecretValue, listSecrets, setSecretRef } from "./secrets";
+import { loadUiConfig } from "./ui-config";
 
 const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
@@ -89,6 +90,7 @@ const auth = getAuthState();
 let controlPlane = loadControlPlane();
 let toolsConfig = loadToolsConfig(controlPlane.root);
 let policy = loadPolicy(controlPlane.root);
+let uiConfig = loadUiConfig(controlPlane.root);
 let pluginLoadResults = await loadPluginDefinitions(pluginsRoot);
 let plugins = pluginLoadResults.map((entry) => ({
   ...entry.manifest,
@@ -124,6 +126,7 @@ async function rebuildRuntimeState() {
   controlPlane = loadControlPlane();
   toolsConfig = loadToolsConfig(controlPlane.root);
   policy = loadPolicy(controlPlane.root);
+  uiConfig = loadUiConfig(controlPlane.root);
   pluginLoadResults = await loadPluginDefinitions(pluginsRoot);
   plugins = pluginLoadResults.map((entry) => ({
     ...entry.manifest,
@@ -409,7 +412,10 @@ app.post("/chat/messages", async ({ body }) => {
     plugins,
     controlPlaneRoot: controlPlane.root,
     workspaceRoot,
-    handlerNames: Array.from(toolRegistry.handlers.keys())
+    handlerNames: Array.from(toolRegistry.handlers.keys()),
+    onControlPlaneChanged: async () => {
+      await rebuildRuntimeState();
+    }
   };
 
   const history = listMessages(db, sessionId, 200);
@@ -465,7 +471,10 @@ app.post("/chat/stream", async ({ body }) => {
     plugins,
     controlPlaneRoot: controlPlane.root,
     workspaceRoot,
-    handlerNames: Array.from(toolRegistry.handlers.keys())
+    handlerNames: Array.from(toolRegistry.handlers.keys()),
+    onControlPlaneChanged: async () => {
+      await rebuildRuntimeState();
+    }
   };
 
   const sessionId = Number(payload.sessionId);
@@ -716,6 +725,7 @@ app.post("/jobs/:id/disable", ({ params }) => {
 });
 
 app.get("/control-plane", () => ({ ok: true, ...controlPlane }));
+app.get("/ui/config", () => ({ ok: true, config: uiConfig }));
 app.post("/control-plane/reload", async () => {
   await rebuildRuntimeState();
   writeAudit(db, {

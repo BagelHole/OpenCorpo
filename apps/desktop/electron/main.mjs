@@ -24,7 +24,7 @@ const runtimeConfig = isDev
   ? {
       root: runtimeRoot,
       dataDir: runtimeRoot,
-      configDir: path.join(projectRoot, "config"),
+      configDir: path.join(runtimeRoot, "config"),
       pluginsDir: path.join(projectRoot, "plugins"),
       userlandDir: path.join(projectRoot, "userland"),
       workspaceDir: path.join(projectRoot, "userland", "workspace"),

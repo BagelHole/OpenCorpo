@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -8,13 +8,14 @@ import { ChatView } from "@/views/ChatView";
 import { InboxView } from "@/views/InboxView";
 import { SettingsView } from "@/views/SettingsView";
 import { AuditView } from "@/views/AuditView";
+import { BaseUiPageView } from "@/views/BaseUiPageView";
 import { cn } from "@/lib/utils";
+import type { UiPage, UiSidebarItem } from "@/lib/api";
 
-type NavItem = {
-  path: string;
-  label: string;
-  show?: boolean;
-};
+function shouldShowNavItem(item: UiSidebarItem, advancedMode: boolean) {
+  if (item.showWhen === "advanced") return advancedMode;
+  return true;
+}
 
 export function App() {
   const state = useOpenCorpo();
@@ -25,17 +26,110 @@ export function App() {
       return false;
     }
   });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const stored = localStorage.getItem("opencorpo_sidebar_collapsed");
+      if (stored !== null) return stored === "true";
+      return Boolean(state.uiConfig?.sidebar?.defaultCollapsed);
+    } catch {
+      return Boolean(state.uiConfig?.sidebar?.defaultCollapsed);
+    }
+  });
 
-  const navItems: NavItem[] = [
-    { path: "/", label: "Chat", show: true },
-    { path: "/inbox", label: "Inbox", show: true },
-    { path: "/settings", label: "Settings", show: true },
-    { path: "/audit", label: "Audit", show: advancedMode },
-  ];
+  const navItems = useMemo(
+    () => state.uiConfig.sidebar.items.filter((item) => shouldShowNavItem(item, advancedMode)),
+    [advancedMode, state.uiConfig.sidebar.items]
+  );
+  const pageById = useMemo(() => {
+    const map = new Map<string, UiPage>();
+    for (const page of state.uiConfig.pages) map.set(page.id, page);
+    return map;
+  }, [state.uiConfig.pages]);
+  const defaultPath = navItems[0]?.path ?? "/";
 
   const setAdvancedAndPersist = (next: boolean) => {
     setAdvancedMode(next);
     localStorage.setItem("opencorpo_advanced_mode", String(next));
+  };
+
+  const toggleSidebarCollapsed = () => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    localStorage.setItem("opencorpo_sidebar_collapsed", String(next));
+  };
+
+  const renderPage = (pageId: string) => {
+    const page = pageById.get(pageId);
+    if (!page) {
+      return (
+        <div className="rounded-lg border border-[var(--oc-warning)]/50 bg-[var(--oc-warning-bg)] px-4 py-3 text-sm text-[var(--oc-warning)]">
+          Missing page config for <code>{pageId}</code>.
+        </div>
+      );
+    }
+
+    const inScrollableShell = (content: ReactNode) => (
+      <div className="oc-scrollbar-subtle min-h-0 flex-1 overflow-y-auto pr-1">
+        {content}
+      </div>
+    );
+
+    if (page.kind === "base") {
+      return inScrollableShell(<BaseUiPageView page={page} />);
+    }
+
+    if (page.builtin === "chat") {
+      return (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ChatView />
+        </div>
+      );
+    }
+
+    if (page.builtin === "jobs") {
+      return inScrollableShell(
+        <InboxView
+          approvals={state.approvals}
+          jobs={state.jobs}
+          jobRuns={state.jobRuns}
+          onApproval={state.updateApproval}
+          onRunJob={state.runJob}
+          onToggleJob={state.toggleJob}
+        />
+      );
+    }
+
+    if (page.builtin === "settings") {
+      return inScrollableShell(
+        <SettingsView
+          daemonStatus={state.daemonStatus}
+          diagnostics={state.diagnostics}
+          plugins={state.plugins}
+          gmailStatus={state.gmailStatus}
+          onboarding={state.onboarding}
+          profile={state.profile}
+          aiModelDefaults={state.aiModelDefaults}
+          persistOnboarding={state.persistOnboarding}
+          onSaveProfile={state.saveProfile}
+          onSaveAiModelDefaults={state.saveAiModelDefaults}
+          saveAiProvider={state.saveAiProvider}
+          onRestartDaemon={state.restartDaemon}
+          onRunDiagnostics={state.runDiagnosticsNow}
+          onRunRepair={state.runRepair}
+          onGetOauthStart={state.getGmailOauthStart}
+          onSaveGmailToken={state.saveGmailToken}
+          onSaveAiKey={state.saveAiKey}
+          checkAiKeyConfigured={state.checkAiKeyConfigured}
+          onToggleAdvanced={setAdvancedAndPersist}
+          advancedMode={advancedMode}
+          apiBase={state.apiBase}
+        />
+      );
+    }
+
+    return advancedMode
+      ? inScrollableShell(<AuditView audit={state.audit} />)
+      : <Navigate to={defaultPath} replace />;
   };
 
   if (!state.onboarding.completed) {
@@ -86,119 +180,74 @@ export function App() {
       </header>
 
       <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 gap-4 overflow-hidden px-4 py-4 sm:px-6 lg:gap-6">
-        <aside className="hidden w-52 flex-shrink-0 lg:block">
+        <aside className={cn("hidden flex-shrink-0 lg:block", sidebarCollapsed ? "w-16" : "w-52")}>
           <nav className="sticky top-24 space-y-1 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2">
-            {navItems
-              .filter((item) => item.show !== false)
-              .map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    cn(
-                      "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-[var(--oc-accent)] text-[var(--oc-bg)]"
-                        : "text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border)] hover:text-[var(--oc-ink)]"
-                    )
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            {advancedMode && (
-              <div className="mt-4 border-t border-[var(--oc-border)] pt-2">
-                <button
-                  onClick={() => setAdvancedAndPersist(false)}
-                  className="w-full rounded-md px-3 py-2 text-left text-xs text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border)]"
-                >
-                  Hide advanced
-                </button>
-              </div>
+            {state.uiConfig.sidebar.collapsible && (
+              <button
+                onClick={toggleSidebarCollapsed}
+                className="mb-1 w-full rounded-md border border-[var(--oc-border)] bg-[var(--oc-bg)] px-2 py-1 text-xs text-[var(--oc-ink-muted)] hover:border-[var(--oc-border-strong)] hover:text-[var(--oc-ink)]"
+              >
+                {sidebarCollapsed ? ">" : "<"}
+              </button>
             )}
+            {navItems.map((item) => (
+              <NavLink
+                key={item.id}
+                to={item.path}
+                className={({ isActive }) =>
+                  cn(
+                    "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    sidebarCollapsed && "px-2 text-center",
+                    isActive
+                      ? "bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                      : "text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border)] hover:text-[var(--oc-ink)]"
+                  )
+                }
+                title={item.label}
+              >
+                {sidebarCollapsed ? item.label.slice(0, 1) : item.label}
+              </NavLink>
+            ))}
           </nav>
         </aside>
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Routes>
-            <Route
-              path="/"
-              element={
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <ChatView />
-                </div>
-              }
-            />
-            <Route
-              path="/inbox"
-              element={
-                <InboxView
-                  approvals={state.approvals}
-                  jobs={state.jobs}
-                  jobRuns={state.jobRuns}
-                  onApproval={state.updateApproval}
-                  onRunJob={state.runJob}
-                  onToggleJob={state.toggleJob}
-                />
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <SettingsView
-                  daemonStatus={state.daemonStatus}
-                  diagnostics={state.diagnostics}
-                  plugins={state.plugins}
-                  gmailStatus={state.gmailStatus}
-                  onboarding={state.onboarding}
-                  profile={state.profile}
-                  aiModelDefaults={state.aiModelDefaults}
-                  persistOnboarding={state.persistOnboarding}
-                  onSaveProfile={state.saveProfile}
-                  onSaveAiModelDefaults={state.saveAiModelDefaults}
-                  saveAiProvider={state.saveAiProvider}
-                  onRestartDaemon={state.restartDaemon}
-                  onRunDiagnostics={state.runDiagnosticsNow}
-                  onRunRepair={state.runRepair}
-                  onGetOauthStart={state.getGmailOauthStart}
-                  onSaveGmailToken={state.saveGmailToken}
-                  onSaveAiKey={state.saveAiKey}
-                  checkAiKeyConfigured={state.checkAiKeyConfigured}
-                  onToggleAdvanced={setAdvancedAndPersist}
-                  advancedMode={advancedMode}
-                  apiBase={state.apiBase}
-                />
-              }
-            />
-            {advancedMode && (
-              <Route path="/audit" element={<AuditView audit={state.audit} />} />
-            )}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="/inbox" element={<Navigate to="/jobs" replace />} />
+            {state.uiConfig.sidebar.items.map((item) => (
+              <Route
+                key={`${item.id}:${item.path}`}
+                path={item.path}
+                element={
+                  shouldShowNavItem(item, advancedMode)
+                    ? renderPage(item.pageId)
+                    : <Navigate to={defaultPath} replace />
+                }
+              />
+            ))}
+            <Route path="*" element={<Navigate to={defaultPath} replace />} />
           </Routes>
         </main>
       </div>
 
-      {/* Mobile nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-10 flex border-t border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] lg:hidden">
         <div className="mx-auto flex w-full max-w-lg justify-around py-2">
-          {navItems
-            .filter((item) => item.show !== false)
-            .map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={({ isActive }) =>
-                  cn(
-                    "flex flex-col items-center gap-0.5 rounded-lg px-4 py-2 text-xs font-medium transition-colors",
-                    isActive
-                      ? "text-[var(--oc-accent)]"
-                      : "text-[var(--oc-ink-muted)]"
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
+          {navItems.map((item) => (
+            <NavLink
+              key={item.id}
+              to={item.path}
+              className={({ isActive }) =>
+                cn(
+                  "flex flex-col items-center gap-0.5 rounded-lg px-4 py-2 text-xs font-medium transition-colors",
+                  isActive
+                    ? "text-[var(--oc-accent)]"
+                    : "text-[var(--oc-ink-muted)]"
+                )
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
         </div>
       </nav>
       <div className="h-16 lg:hidden" aria-hidden />

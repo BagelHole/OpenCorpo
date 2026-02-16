@@ -22,11 +22,16 @@ Available tools:
 - list_tools, get_tool_detail: Registered tools
 - list_plugins: Loaded plugins
 - get_help: Example prompts
+- http_get, web_search: Public web and HTTP lookup tools
 - list_available_handlers: Tool names with plugin handlers (use before adding tools)
 - get_tool_schema: JSON schema for tool definitions
-- propose_config_change: Add/update tools, jobs, workflows (config/tools/*.json, jobs/*.json)
+- get_ui_schema: JSON schema for UI config
+- get_control_plane_json: Read current control-plane JSON before editing
+- propose_config_change: Add/update tools, jobs, workflows, UI (config/tools/*.json, jobs/*.json, ui/*.json)
 - propose_code_change: Propose workspace code changes (requires approval)
 - list_control_plane_changes, apply_control_plane_change: Manage proposals
+
+When asked to add/update sidebar items or pages, first read ui/desktop.json and get_ui_schema, then apply a valid full-file JSON update via propose_config_change.
 
 For greetings and casual chat, respond conversationally. For any request about data or actions, use tools first.`;
 
@@ -193,7 +198,9 @@ export async function runAgentWithLLM(
       text += part;
     }
 
-    const fullText = text.trim() || "I don't have a response for that.";
+    const fullText =
+      text.trim() ||
+      "Done. I executed the request, but I do not have a text summary for this step.";
     return {
       text: fullText,
       metadata: { source: "llm" }

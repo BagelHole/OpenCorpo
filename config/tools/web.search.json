@@ -1,0 +1,41 @@
+{
+  "name": "web.search",
+  "version": "0.0.1",
+  "risk": "medium",
+  "capabilities": ["web.search"],
+  "inputs": {
+    "type": "object",
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxResults": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "ok": { "type": "boolean" },
+      "error": { "type": "string" },
+      "query": { "type": "string" },
+      "source": { "type": "string" },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string" },
+            "snippet": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

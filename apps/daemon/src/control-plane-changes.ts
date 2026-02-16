@@ -15,6 +15,7 @@ function resolveRisk(relativePath: string) {
   if (relativePath.startsWith("tools/")) return "high";
   if (relativePath.startsWith("jobs/")) return "medium";
   if (relativePath.startsWith("workflows/")) return "medium";
+  if (relativePath.startsWith("ui/")) return "medium";
   return "low";
 }
 

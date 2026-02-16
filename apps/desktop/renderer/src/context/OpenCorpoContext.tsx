@@ -16,6 +16,7 @@ import type {
   PluginInfo,
   ToolInfo,
   DiagnosticsReport,
+  UiConfig,
 } from "@/lib/api";
 import { OpenCorpoApi } from "@/lib/api";
 
@@ -81,6 +82,43 @@ const ONBOARDING_KEY = "opencorpo_onboarding_v2";
 const ACTIVE_CHAT_SESSION_KEY = "opencorpo_active_chat_session";
 const CHAT_SESSIONS_CACHE_KEY = "opencorpo_chat_sessions_cache_v1";
 const CHAT_MESSAGES_CACHE_KEY = "opencorpo_chat_messages_cache_v1";
+
+const DEFAULT_UI_CONFIG: UiConfig = {
+  name: "fallback",
+  sidebar: {
+    collapsible: true,
+    defaultCollapsed: false,
+    items: [
+      { id: "chat", label: "Chat", path: "/", pageId: "chat" },
+      { id: "jobs", label: "Jobs", path: "/jobs", pageId: "jobs" },
+      { id: "settings", label: "Settings", path: "/settings", pageId: "settings" },
+      {
+        id: "audit",
+        label: "Audit",
+        path: "/audit",
+        pageId: "audit",
+        showWhen: "advanced",
+      },
+    ],
+  },
+  pages: [
+    { id: "chat", kind: "builtin", builtin: "chat" },
+    { id: "jobs", kind: "builtin", builtin: "jobs" },
+    { id: "settings", kind: "builtin", builtin: "settings" },
+    { id: "audit", kind: "builtin", builtin: "audit" },
+  ],
+};
+
+function isValidUiConfig(value: unknown): value is UiConfig {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  if (typeof row.name !== "string") return false;
+  if (!row.sidebar || typeof row.sidebar !== "object") return false;
+  if (!Array.isArray(row.pages)) return false;
+  const sidebar = row.sidebar as Record<string, unknown>;
+  if (!Array.isArray(sidebar.items)) return false;
+  return true;
+}
 
 function writeOnboarding(next: OnboardingData) {
   localStorage.setItem(ONBOARDING_KEY, JSON.stringify(next));
@@ -257,6 +295,7 @@ type OpenCorpoContextValue = {
   profile: UserProfile;
   aiModelDefaults: AiModelDefaults;
   gmailStatus: GmailStatus;
+  uiConfig: UiConfig;
   pendingApprovals: Approval[];
   chatSessions: ChatSessionRecord[];
   activeChatSessionId: number | null;
@@ -336,6 +375,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     tokenSource: null,
     refreshConfigured: false,
   });
+  const [uiConfig, setUiConfig] = useState<UiConfig>(DEFAULT_UI_CONFIG);
   const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(readChatSessionsCache);
   const [activeChatSessionId, setActiveChatSessionId] = useState<number | null>(
     readStoredActiveSessionId
@@ -473,7 +513,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     const currentApi = apiRef.current;
     if (!currentApi || !daemonStatus.ready) return;
     try {
-      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, gmailRes] =
+      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, gmailRes, uiRes] =
         await Promise.all([
           currentApi.listApprovals(),
           currentApi.listJobs(),
@@ -482,6 +522,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           currentApi.listPlugins(),
           currentApi.listTools(),
           currentApi.getGmailStatus(),
+          currentApi.getUiConfig(),
         ]);
 
       if (approvalsRes.ok) setApprovals(approvalsRes.data.items ?? []);
@@ -496,6 +537,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           tokenSource: gmailRes.data.tokenSource,
           refreshConfigured: gmailRes.data.refreshConfigured,
         });
+      }
+      if (uiRes.ok && isValidUiConfig(uiRes.data.config)) {
+        setUiConfig(uiRes.data.config);
       }
       setApiError(null);
     } catch (error) {
@@ -951,6 +995,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       gmailStatus,
+      uiConfig,
       pendingApprovals,
       chatSessions,
       activeChatSessionId,
@@ -999,6 +1044,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       gmailStatus,
+      uiConfig,
       pendingApprovals,
       chatSessions,
       activeChatSessionId,

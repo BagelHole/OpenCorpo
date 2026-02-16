@@ -1,4 +1,5 @@
 import type { ToolHandler } from "../../packages/plugin-sdk/src/index";
+import { runHttpGet, runWebSearch } from "../../apps/daemon/src/web-tools";
 
 const ping: ToolHandler = {
   name: "system.ping",
@@ -11,14 +12,34 @@ const ping: ToolHandler = {
   }
 };
 
+const httpGet: ToolHandler = {
+  name: "http.get",
+  version: "0.0.1",
+  risk: "medium",
+  capabilities: ["web.http"],
+  async run(input) {
+    return runHttpGet(input);
+  }
+};
+
+const webSearch: ToolHandler = {
+  name: "web.search",
+  version: "0.0.1",
+  risk: "medium",
+  capabilities: ["web.search"],
+  async run(input) {
+    return runWebSearch(input);
+  }
+};
+
 export default function createPlugin() {
   return {
     manifest: {
       name: "core",
-      version: "0.0.1",
-      permissions: ["system.ping"],
-      tools: ["system.ping"]
+      version: "0.0.2",
+      permissions: ["system.ping", "web.http", "web.search"],
+      tools: ["system.ping", "http.get", "web.search"]
     },
-    tools: [ping]
+    tools: [ping, httpGet, webSearch]
   };
 }

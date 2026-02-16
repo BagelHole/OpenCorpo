@@ -1,0 +1,42 @@
+{
+  "name": "http.get",
+  "version": "0.0.1",
+  "risk": "medium",
+  "capabilities": ["web.http"],
+  "inputs": {
+    "type": "object",
+    "required": ["url"],
+    "properties": {
+      "url": {
+        "type": "string",
+        "minLength": 1
+      },
+      "headers": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      },
+      "timeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 20000
+      },
+      "maxBytes": {
+        "type": "number",
+        "minimum": 512,
+        "maximum": 100000
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "ok": { "type": "boolean" },
+      "error": { "type": "string" },
+      "url": { "type": "string" },
+      "status": { "type": "number" },
+      "contentType": { "type": ["string", "null"] },
+      "body": { "type": "string" },
+      "truncated": { "type": "boolean" }
+    }
+  }
+}

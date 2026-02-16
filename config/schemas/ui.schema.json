@@ -2,10 +2,165 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OpenCorpo UI",
   "type": "object",
-  "required": ["name", "layout"],
+  "required": ["name", "sidebar", "pages"],
   "properties": {
-    "name": { "type": "string" },
-    "layout": { "type": "object" }
+    "$schema": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "sidebar": {
+      "type": "object",
+      "required": ["collapsible", "items"],
+      "properties": {
+        "collapsible": { "type": "boolean" },
+        "defaultCollapsed": { "type": "boolean" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "path", "pageId"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "label": { "type": "string", "minLength": 1 },
+              "path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "pageId": { "type": "string", "minLength": 1 },
+              "showWhen": {
+                "type": "string",
+                "enum": ["always", "advanced"],
+                "default": "always"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["id", "kind", "builtin"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "const": "builtin" },
+              "builtin": {
+                "type": "string",
+                "enum": ["chat", "jobs", "settings", "audit"]
+              },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["id", "kind", "title", "blocks"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "const": "base" },
+              "title": { "type": "string", "minLength": 1 },
+              "description": { "type": "string" },
+              "blocks": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": ["type", "markdown"],
+                      "properties": {
+                        "type": { "type": "string", "const": "markdown" },
+                        "markdown": { "type": "string" }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": ["type", "items"],
+                      "properties": {
+                        "type": { "type": "string", "const": "stats" },
+                        "items": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "required": ["label", "value"],
+                            "properties": {
+                              "label": { "type": "string" },
+                              "value": { "type": "string" },
+                              "tone": {
+                                "type": "string",
+                                "enum": ["default", "success", "warning", "danger"]
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": ["type", "items"],
+                      "properties": {
+                        "type": { "type": "string", "const": "list" },
+                        "title": { "type": "string" },
+                        "items": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": ["type", "text"],
+                      "properties": {
+                        "type": { "type": "string", "const": "note" },
+                        "tone": {
+                          "type": "string",
+                          "enum": ["default", "success", "warning", "danger"]
+                        },
+                        "text": { "type": "string" }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": ["type", "rows"],
+                      "properties": {
+                        "type": { "type": "string", "const": "key_value" },
+                        "title": { "type": "string" },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["label", "value"],
+                            "properties": {
+                              "label": { "type": "string" },
+                              "value": { "type": "string" }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

@@ -46,7 +46,7 @@ export function InboxView({
     <div className="grid gap-4 sm:gap-5 xl:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Approvals Inbox</CardTitle>
+          <CardTitle>Approvals Queue</CardTitle>
           <p className="text-sm text-[var(--oc-ink-muted)]">
             High-risk actions are queued here for human review.
           </p>

@@ -176,6 +176,10 @@ export class OpenCorpoApi {
     return this.get<{ items: ToolInfo[] }>("/tools");
   }
 
+  async getUiConfig() {
+    return this.get<{ config: UiConfig }>("/ui/config");
+  }
+
   // Connectors
   async getGmailStatus() {
     return this.get<{
@@ -321,4 +325,65 @@ export type DiagnosticsReport = {
   generatedAt: string;
   checks: Array<{ id: string; label: string; ok: boolean; detail: string }>;
   recommendations: string[];
+};
+
+export type UiSidebarItem = {
+  id: string;
+  label: string;
+  path: string;
+  pageId: string;
+  showWhen?: "always" | "advanced";
+};
+
+export type UiBuiltinPage = {
+  id: string;
+  kind: "builtin";
+  builtin: "chat" | "jobs" | "settings" | "audit";
+  title?: string;
+  description?: string;
+};
+
+export type UiBaseBlock =
+  | {
+      type: "markdown";
+      markdown: string;
+    }
+  | {
+      type: "stats";
+      items: Array<{ label: string; value: string; tone?: "default" | "success" | "warning" | "danger" }>;
+    }
+  | {
+      type: "list";
+      title?: string;
+      items: string[];
+    }
+  | {
+      type: "note";
+      tone?: "default" | "success" | "warning" | "danger";
+      text: string;
+    }
+  | {
+      type: "key_value";
+      title?: string;
+      rows: Array<{ label: string; value: string }>;
+    };
+
+export type UiBasePage = {
+  id: string;
+  kind: "base";
+  title: string;
+  description?: string;
+  blocks: UiBaseBlock[];
+};
+
+export type UiPage = UiBuiltinPage | UiBasePage;
+
+export type UiConfig = {
+  name: string;
+  sidebar: {
+    collapsible: boolean;
+    defaultCollapsed?: boolean;
+    items: UiSidebarItem[];
+  };
+  pages: UiPage[];
 };

@@ -1,0 +1,57 @@
+{
+  "$schema": "../schemas/ui.schema.json",
+  "name": "desktop-default",
+  "sidebar": {
+    "collapsible": true,
+    "defaultCollapsed": false,
+    "items": [
+      {
+        "id": "chat",
+        "label": "Chat",
+        "path": "/",
+        "pageId": "chat"
+      },
+      {
+        "id": "jobs",
+        "label": "Jobs",
+        "path": "/jobs",
+        "pageId": "jobs"
+      },
+      {
+        "id": "settings",
+        "label": "Settings",
+        "path": "/settings",
+        "pageId": "settings"
+      },
+      {
+        "id": "audit",
+        "label": "Audit",
+        "path": "/audit",
+        "pageId": "audit",
+        "showWhen": "advanced"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "chat",
+      "kind": "builtin",
+      "builtin": "chat"
+    },
+    {
+      "id": "jobs",
+      "kind": "builtin",
+      "builtin": "jobs"
+    },
+    {
+      "id": "settings",
+      "kind": "builtin",
+      "builtin": "settings"
+    },
+    {
+      "id": "audit",
+      "kind": "builtin",
+      "builtin": "audit"
+    }
+  ]
+}
