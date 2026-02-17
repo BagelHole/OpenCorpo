@@ -459,11 +459,23 @@ export async function runAgentWithLLM(
 
 /** Ensure every message has a `parts` array so convertToModelMessages doesn't crash. */
 function normalizeUIMessages(raw: UIMessage[]): UIMessage[] {
-  return raw.map((m) => ({
-    ...m,
-    id: m.id ?? crypto.randomUUID(),
-    parts: m.parts ?? [{ type: "text" as const, text: m.content ?? "" }]
-  })) as UIMessage[];
+  return raw.map((m) => {
+    const legacyContent =
+      typeof (m as { content?: unknown }).content === "string"
+        ? ((m as { content?: string }).content ?? "")
+        : "";
+    const existingText =
+      m.parts?.find(
+        (part): part is typeof part & { type: "text"; text?: string } =>
+          part.type === "text" && "text" in part && typeof part.text === "string"
+      )?.text ?? "";
+
+    return {
+      ...m,
+      id: m.id ?? crypto.randomUUID(),
+      parts: m.parts ?? [{ type: "text" as const, text: existingText || legacyContent }]
+    };
+  }) as UIMessage[];
 }
 
 export async function streamAgentWithLLM(
