@@ -38,5 +38,12 @@ export function findTool(
   tools: ToolDefinition[],
   name: string
 ): ToolDefinition | null {
-  return tools.find((tool) => tool.name === name) ?? null;
+  const target = normalizeToolName(name);
+  return (
+    tools.find((tool) => normalizeToolName(tool.name) === target) ?? null
+  );
+}
+
+function normalizeToolName(name: string) {
+  return name.trim().toLowerCase().replace(/[_.-]+/g, ".");
 }

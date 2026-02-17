@@ -40,6 +40,23 @@ export type UiBaseBlock =
       type: "key_value";
       title?: string;
       rows: Array<{ label: string; value: string }>;
+    }
+  | {
+      type: "job_results";
+      jobName: string;
+      title?: string;
+      maxItems?: number;
+      emptyText?: string;
+      source?: "auto" | "output" | "outputs";
+    }
+  | {
+      type: "job_table";
+      jobName: string;
+      title?: string;
+      maxRows?: number;
+      columns?: string[];
+      emptyText?: string;
+      source?: "auto" | "output" | "outputs";
     };
 
 export type UiBasePage = {

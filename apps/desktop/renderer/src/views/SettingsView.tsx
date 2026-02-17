@@ -33,6 +33,14 @@ type GmailStatus = {
   refreshConfigured: boolean;
 };
 
+type ScriptSecretItem = {
+  name: string;
+  ref: string;
+  provider: string;
+  updatedAt: string;
+  description: string;
+};
+
 type OnboardingData = {
   completed: boolean;
   aiProvider: "anthropic" | "openai" | "local";
@@ -80,9 +88,11 @@ export function SettingsView({
   onboarding,
   profile,
   aiModelDefaults,
+  scriptSecrets,
   persistOnboarding,
   onSaveProfile,
   onSaveAiModelDefaults,
+  onSaveScriptSecret,
   saveAiProvider,
   onRestartDaemon,
   onRunDiagnostics,
@@ -111,6 +121,7 @@ export function SettingsView({
     openai: string;
     local: string;
   };
+  scriptSecrets: ScriptSecretItem[];
   persistOnboarding: (next: OnboardingData) => void;
   onSaveProfile: (profile: {
     name: string;
@@ -122,6 +133,11 @@ export function SettingsView({
     anthropic: string;
     openai: string;
     local: string;
+  }) => Promise<void>;
+  onSaveScriptSecret: (input: {
+    name: string;
+    value: string;
+    description?: string;
   }) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
   onRestartDaemon: () => Promise<void>;
@@ -140,6 +156,10 @@ export function SettingsView({
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [scriptSecretMessage, setScriptSecretMessage] = useState<string | null>(null);
+  const [scriptSecretNameInput, setScriptSecretNameInput] = useState("");
+  const [scriptSecretDescriptionInput, setScriptSecretDescriptionInput] = useState("");
+  const [scriptSecretValueInput, setScriptSecretValueInput] = useState("");
   const [profileInput, setProfileInput] = useState(() => normalizeProfile(profile));
   const [modelDefaultsInput, setModelDefaultsInput] = useState(() =>
     normalizeModelDefaults(aiModelDefaults)
@@ -221,6 +241,34 @@ export function SettingsView({
       setAiKeyMessage("Default models saved.");
     } catch (error) {
       setAiKeyMessage(error instanceof Error ? error.message : "Failed to save model defaults.");
+    }
+  };
+
+  const saveScriptSecret = async () => {
+    const name = scriptSecretNameInput.trim();
+    const value = scriptSecretValueInput.trim();
+    if (!name) {
+      setScriptSecretMessage("Enter a secret name first.");
+      return;
+    }
+    if (!value) {
+      setScriptSecretMessage("Enter a secret value first.");
+      return;
+    }
+    try {
+      await onSaveScriptSecret({
+        name,
+        value,
+        description: scriptSecretDescriptionInput.trim()
+      });
+      setScriptSecretValueInput("");
+      setScriptSecretNameInput("");
+      setScriptSecretDescriptionInput("");
+      setScriptSecretMessage("Script secret saved.");
+    } catch (error) {
+      setScriptSecretMessage(
+        error instanceof Error ? error.message : "Failed to save script secret."
+      );
     }
   };
 
@@ -345,6 +393,64 @@ export function SettingsView({
           <Button size="sm" onClick={() => void saveModelDefaults()}>
             Save model defaults
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Script Secrets</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-xs text-[var(--oc-ink-muted)]">
+            Add credentials for generated scripts. The AI can reference secret names and file
+            locations, but not values.
+          </p>
+          <input
+            value={scriptSecretNameInput}
+            onChange={(event) => setScriptSecretNameInput(event.target.value)}
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Secret name (example: stripe.api_key)"
+          />
+          <input
+            value={scriptSecretDescriptionInput}
+            onChange={(event) => setScriptSecretDescriptionInput(event.target.value)}
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Description (optional)"
+          />
+          <input
+            type="password"
+            value={scriptSecretValueInput}
+            onChange={(event) => setScriptSecretValueInput(event.target.value)}
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            placeholder="Secret value"
+          />
+          <Button size="sm" onClick={() => void saveScriptSecret()}>
+            Save script secret
+          </Button>
+          {scriptSecretMessage && (
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+              {scriptSecretMessage}
+            </div>
+          )}
+          <div className="space-y-2">
+            {scriptSecrets.length === 0 && (
+              <div className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+                No script secrets saved yet.
+              </div>
+            )}
+            {scriptSecrets.map((secret) => (
+              <div
+                key={secret.name}
+                className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2"
+              >
+                <div className="text-xs font-semibold text-[var(--oc-ink)]">{secret.name}</div>
+                {secret.description && (
+                  <div className="mt-0.5 text-xs text-[var(--oc-ink-muted)]">{secret.description}</div>
+                )}
+                <div className="mt-1 text-[11px] text-[var(--oc-ink-muted)]">{secret.ref}</div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
 

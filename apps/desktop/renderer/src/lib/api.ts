@@ -15,6 +15,14 @@ export type AiProviderCatalog = {
   }>;
 };
 
+export type ScriptSecretItem = {
+  name: string;
+  ref: string;
+  provider: string;
+  updatedAt: string;
+  description: string;
+};
+
 export class OpenCorpoApi {
   constructor(
     private baseUrl: string,
@@ -123,7 +131,7 @@ export class OpenCorpoApi {
   async sendMessage(
     sessionId: number,
     content: string,
-    options?: { skipAgent?: boolean; model?: string; provider?: string }
+    options?: { skipAgent?: boolean; model?: string; provider?: string; requestId?: string }
   ) {
     return this.post<{ messageId: number; assistantMessageId?: number; reply?: string }>(
       "/chat/messages",
@@ -133,7 +141,8 @@ export class OpenCorpoApi {
         content,
         skipAgent: options?.skipAgent === true,
         model: options?.model,
-        provider: options?.provider
+        provider: options?.provider,
+        requestId: options?.requestId
       }
     );
   }
@@ -266,6 +275,17 @@ export class OpenCorpoApi {
     }>("/secrets/ai-model-defaults", defaults);
   }
 
+  async getScriptSecrets() {
+    return this.get<{ items: ScriptSecretItem[] }>("/secrets/script");
+  }
+
+  async saveScriptSecret(input: { name: string; value: string; description?: string }) {
+    return this.post<{
+      ok: boolean;
+      item: { name: string; ref: string; description: string };
+    }>("/secrets/script", input);
+  }
+
   // Diagnostics
   async runDiagnostics() {
     return this.get<{ report: DiagnosticsReport }>("/diagnostics");
@@ -309,6 +329,7 @@ export type JobRun = {
   ts: string;
   status: string;
   error?: string | null;
+  output?: Record<string, unknown> | null;
 };
 
 export type AuditEntry = {
@@ -380,6 +401,23 @@ export type UiBaseBlock =
       type: "key_value";
       title?: string;
       rows: Array<{ label: string; value: string }>;
+    }
+  | {
+      type: "job_results";
+      jobName: string;
+      title?: string;
+      maxItems?: number;
+      emptyText?: string;
+      source?: "auto" | "output" | "outputs";
+    }
+  | {
+      type: "job_table";
+      jobName: string;
+      title?: string;
+      maxRows?: number;
+      columns?: string[];
+      emptyText?: string;
+      source?: "auto" | "output" | "outputs";
     };
 
 export type UiBasePage = {

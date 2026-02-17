@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { AgentContext } from "./agent";
+import type { AgentContext, AgentToolEvent } from "./agent";
 import {
   buildApprovalsList,
   buildAuditList,
@@ -57,12 +57,79 @@ function normalizeControlPlanePath(path: string) {
   return normalized;
 }
 
+function toPreview(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") return value.slice(0, 220);
+  try {
+    return JSON.stringify(value).slice(0, 220);
+  } catch {
+    return String(value).slice(0, 220);
+  }
+}
+
+function emitToolEvent(context: AgentContext, event: AgentToolEvent) {
+  context.onAgentToolEvent?.(event);
+  writeEvent(context.db, {
+    type: `agent.tool.${event.phase}`,
+    data: {
+      phase: event.phase,
+      tool: event.tool,
+      at: event.at,
+      requestId: event.requestId ?? null,
+      sessionId: event.sessionId ?? null,
+      inputPreview: event.inputPreview ?? null,
+      outputPreview: event.outputPreview ?? null,
+      error: event.error ?? null
+    }
+  });
+}
+
+function withToolTelemetry<TInput, TResult>(
+  context: AgentContext,
+  toolName: string,
+  execute: (input: TInput) => Promise<TResult> | TResult
+) {
+  return async (input: TInput): Promise<TResult> => {
+    const startedAt = new Date().toISOString();
+    emitToolEvent(context, {
+      phase: "started",
+      tool: toolName,
+      at: startedAt,
+      requestId: context.chatRequestId,
+      sessionId: context.chatSessionId,
+      inputPreview: toPreview(input)
+    });
+    try {
+      const output = await execute(input);
+      emitToolEvent(context, {
+        phase: "completed",
+        tool: toolName,
+        at: new Date().toISOString(),
+        requestId: context.chatRequestId,
+        sessionId: context.chatSessionId,
+        outputPreview: toPreview(output)
+      });
+      return output;
+    } catch (error) {
+      emitToolEvent(context, {
+        phase: "failed",
+        tool: toolName,
+        at: new Date().toISOString(),
+        requestId: context.chatRequestId,
+        sessionId: context.chatSessionId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  };
+}
+
 export function buildAgentTools(context: AgentContext) {
   return {
     get_status: tool({
       description: "Get a summary of OpenCorpo's current state (approvals, jobs, tools, plugins, latest audit). Use this when the user asks about status, what's going on, or needs an overview.",
       inputSchema: z.object({}),
-      execute: async () => buildStatusSummary(context)
+      execute: withToolTelemetry(context, "get_status", async () => buildStatusSummary(context))
     }),
 
     get_approvals: tool({
@@ -70,8 +137,8 @@ export function buildAgentTools(context: AgentContext) {
       inputSchema: z.object({
         pending_only: z.boolean().optional().describe("If true, only show pending approvals")
       }),
-      execute: async ({ pending_only }) =>
-        buildApprovalsList(context.db, pending_only ?? true)
+      execute: withToolTelemetry(context, "get_approvals", async ({ pending_only }) =>
+        buildApprovalsList(context.db, pending_only ?? true))
     }),
 
     approve: tool({
@@ -79,8 +146,8 @@ export function buildAgentTools(context: AgentContext) {
       inputSchema: z.object({
         approval_id: z.number().describe("The approval ID to approve")
       }),
-      execute: async ({ approval_id }) =>
-        handleApprovalAction(context.db, approval_id, "approved").text
+      execute: withToolTelemetry(context, "approve", async ({ approval_id }) =>
+        handleApprovalAction(context.db, approval_id, "approved").text)
     }),
 
     deny: tool({
@@ -88,20 +155,20 @@ export function buildAgentTools(context: AgentContext) {
       inputSchema: z.object({
         approval_id: z.number().describe("The approval ID to deny")
       }),
-      execute: async ({ approval_id }) =>
-        handleApprovalAction(context.db, approval_id, "denied").text
+      execute: withToolTelemetry(context, "deny", async ({ approval_id }) =>
+        handleApprovalAction(context.db, approval_id, "denied").text)
     }),
 
     list_jobs: tool({
       description: "List all jobs. Use when user asks about jobs, schedules, or automations.",
       inputSchema: z.object({}),
-      execute: async () => buildJobsList(context.db)
+      execute: withToolTelemetry(context, "list_jobs", async () => buildJobsList(context.db))
     }),
 
     list_job_runs: tool({
       description: "List recent job runs. Use when user asks about job runs, execution history.",
       inputSchema: z.object({}),
-      execute: async () => buildJobRunsList(context.db)
+      execute: withToolTelemetry(context, "list_job_runs", async () => buildJobRunsList(context.db))
     }),
 
     run_job: tool({
@@ -110,71 +177,77 @@ export function buildAgentTools(context: AgentContext) {
         job_id: z.number().optional().describe("Job ID to run"),
         job_name: z.string().optional().describe("Job name to run (e.g. heartbeat)")
       }),
-      execute: async ({ job_id, job_name }) => {
+      execute: withToolTelemetry(context, "run_job", async ({ job_id, job_name }) => {
         if (job_id != null) return handleJobRun(context.db, job_id).text;
         if (job_name) return handleJobRunByName(context.db, job_name).text;
         return "Specify job_id or job_name to run a job.";
-      }
+      })
     }),
 
     enable_job: tool({
       description: "Enable a job by ID.",
       inputSchema: z.object({ job_id: z.number() }),
-      execute: async ({ job_id }) => handleJobToggle(context.db, job_id, true).text
+      execute: withToolTelemetry(context, "enable_job", async ({ job_id }) =>
+        handleJobToggle(context.db, job_id, true).text)
     }),
 
     disable_job: tool({
       description: "Disable a job by ID.",
       inputSchema: z.object({ job_id: z.number() }),
-      execute: async ({ job_id }) => handleJobToggle(context.db, job_id, false).text
+      execute: withToolTelemetry(context, "disable_job", async ({ job_id }) =>
+        handleJobToggle(context.db, job_id, false).text)
     }),
 
     list_audit: tool({
       description: "List recent audit log entries. Use when user asks about audit, history, or what happened.",
       inputSchema: z.object({}),
-      execute: async () => buildAuditList(context.db)
+      execute: withToolTelemetry(context, "list_audit", async () => buildAuditList(context.db))
     }),
 
     get_audit_detail: tool({
       description: "Get details of a specific audit entry by ID.",
       inputSchema: z.object({ audit_id: z.number() }),
-      execute: async ({ audit_id }) => handleAuditDetail(context.db, audit_id).text
+      execute: withToolTelemetry(context, "get_audit_detail", async ({ audit_id }) =>
+        handleAuditDetail(context.db, audit_id).text)
     }),
 
     get_job_run_detail: tool({
       description: "Get details of a specific job run by ID.",
       inputSchema: z.object({ job_run_id: z.number() }),
-      execute: async ({ job_run_id }) => handleJobRunDetail(context.db, job_run_id).text
+      execute: withToolTelemetry(context, "get_job_run_detail", async ({ job_run_id }) =>
+        handleJobRunDetail(context.db, job_run_id).text)
     }),
 
     get_tool_run_detail: tool({
       description: "Get details of a specific tool run by ID.",
       inputSchema: z.object({ tool_run_id: z.number() }),
-      execute: async ({ tool_run_id }) => handleToolRunDetail(context.db, tool_run_id).text
+      execute: withToolTelemetry(context, "get_tool_run_detail", async ({ tool_run_id }) =>
+        handleToolRunDetail(context.db, tool_run_id).text)
     }),
 
     list_tools: tool({
       description: "List registered tools. Use when user asks about capabilities or what tools are available.",
       inputSchema: z.object({}),
-      execute: async () => buildToolsList(context.tools)
+      execute: withToolTelemetry(context, "list_tools", async () => buildToolsList(context.tools))
     }),
 
     get_tool_detail: tool({
       description: "Get details of a specific tool by name.",
       inputSchema: z.object({ tool_name: z.string() }),
-      execute: async ({ tool_name }) => handleToolDetail(context.tools, tool_name).text
+      execute: withToolTelemetry(context, "get_tool_detail", async ({ tool_name }) =>
+        handleToolDetail(context.tools, tool_name).text)
     }),
 
     list_plugins: tool({
       description: "List loaded plugins. Use when user asks about plugins, integrations, Gmail, connectors.",
       inputSchema: z.object({}),
-      execute: async () => buildPluginsList(context.plugins)
+      execute: withToolTelemetry(context, "list_plugins", async () => buildPluginsList(context.plugins))
     }),
 
     get_help: tool({
       description: "Get help on what OpenCorpo can do and example prompts.",
       inputSchema: z.object({}),
-      execute: async () => buildHelpText()
+      execute: withToolTelemetry(context, "get_help", async () => buildHelpText())
     }),
 
     http_get: tool({
@@ -185,8 +258,8 @@ export function buildAgentTools(context: AgentContext) {
         timeout_ms: z.number().min(1000).max(20000).optional(),
         max_bytes: z.number().min(512).max(100000).optional()
       }),
-      execute: async ({ url, timeout_ms, max_bytes }) =>
-        runHttpGet({ url, timeoutMs: timeout_ms, maxBytes: max_bytes })
+      execute: withToolTelemetry(context, "http_get", async ({ url, timeout_ms, max_bytes }) =>
+        runHttpGet({ url, timeoutMs: timeout_ms, maxBytes: max_bytes }))
     }),
 
     web_search: tool({
@@ -196,40 +269,40 @@ export function buildAgentTools(context: AgentContext) {
         query: z.string().min(1),
         max_results: z.number().min(1).max(10).optional()
       }),
-      execute: async ({ query, max_results }) =>
-        runWebSearch({ query, maxResults: max_results })
+      execute: withToolTelemetry(context, "web_search", async ({ query, max_results }) =>
+        runWebSearch({ query, maxResults: max_results }))
     }),
 
     list_available_handlers: tool({
       description:
         "List tool names that have plugin handlers. Use before adding a new tool to see which names can be used. Agent can add config for tools that match these handlers.",
       inputSchema: z.object({}),
-      execute: async () => {
+      execute: withToolTelemetry(context, "list_available_handlers", async () => {
         const names = context.handlerNames ?? [];
         if (names.length === 0) return "No plugin handlers loaded. Install plugins to add tools.";
         return `Available handler names: ${names.join(", ")}. You can add tool definitions (tools/*.json) for these names.`;
-      }
+      })
     }),
 
     get_tool_schema: tool({
       description:
         "Get the JSON schema for tool definitions. Use when creating a new tool via propose_config_change.",
       inputSchema: z.object({}),
-      execute: async () => TOOL_SCHEMA_JSON
+      execute: withToolTelemetry(context, "get_tool_schema", async () => TOOL_SCHEMA_JSON)
     }),
 
     get_ui_schema: tool({
       description:
         "Get the JSON schema for UI config files. Use before proposing ui/*.json changes.",
       inputSchema: z.object({}),
-      execute: async () => {
+      execute: withToolTelemetry(context, "get_ui_schema", async () => {
         try {
           const schemaPath = resolve(context.controlPlaneRoot, "schemas/ui.schema.json");
           return readFileSync(schemaPath, "utf-8");
         } catch {
           return "UI schema not found.";
         }
-      }
+      })
     }),
 
     get_control_plane_json: tool({
@@ -240,7 +313,7 @@ export function buildAgentTools(context: AgentContext) {
           .string()
           .describe("Path under config root, e.g. ui/desktop.json")
       }),
-      execute: async ({ relative_path }) => {
+      execute: withToolTelemetry(context, "get_control_plane_json", async ({ relative_path }) => {
         const normalized = normalizeControlPlanePath(relative_path);
         if (!normalized) return "Invalid control-plane path. Must be a safe .json relative path.";
         const absolutePath = resolve(context.controlPlaneRoot, normalized);
@@ -255,22 +328,22 @@ export function buildAgentTools(context: AgentContext) {
         } catch (err) {
           return `Failed to read ${normalized}: ${err instanceof Error ? err.message : "unknown_error"}`;
         }
-      }
+      })
     }),
 
     list_control_plane_changes: tool({
       description: "List proposed/applied control plane changes. Use to check status of proposals.",
       inputSchema: z.object({}),
-      execute: async () => {
+      execute: withToolTelemetry(context, "list_control_plane_changes", async () => {
         const changes = listControlPlaneChanges(context.db, 15);
         if (changes.length === 0) return "No control plane changes.";
         return changes
           .map(
-            (c) =>
+            (c: { id: number; file_path: string; status: string; risk: string; summary?: string | null }) =>
               `#${c.id} ${c.file_path} (${c.status}) ${c.risk} - ${c.summary ?? ""}`
           )
           .join("\n");
-      }
+      })
     }),
 
     propose_config_change: tool({
@@ -282,7 +355,7 @@ export function buildAgentTools(context: AgentContext) {
           .describe("e.g. tools/mytool.json, jobs/daily.job.json"),
         after_json: z.record(z.unknown()).describe("The full JSON content for the file")
       }),
-      execute: async ({ relative_path, after_json }) => {
+      execute: withToolTelemetry(context, "propose_config_change", async ({ relative_path, after_json }) => {
         const normalized = relative_path.replaceAll("\\", "/").replace(/^\/+/, "");
         if (!normalized.endsWith(".json")) {
           return "Control plane changes must target .json files.";
@@ -328,7 +401,7 @@ export function buildAgentTools(context: AgentContext) {
         } catch (err) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
-      }
+      })
     }),
 
     propose_code_change: tool({
@@ -338,7 +411,7 @@ export function buildAgentTools(context: AgentContext) {
         target_path: z.string().describe("Relative path in workspace, e.g. notes.ts"),
         after_content: z.string().describe("The new file content")
       }),
-      execute: async ({ target_path, after_content }) => {
+      execute: withToolTelemetry(context, "propose_code_change", async ({ target_path, after_content }) => {
         try {
           const proposal = proposeCodeChange(context.db, context.workspaceRoot, {
             actor: "agent",
@@ -367,7 +440,7 @@ export function buildAgentTools(context: AgentContext) {
         } catch (err) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
-      }
+      })
     }),
 
     apply_control_plane_change: tool({
@@ -376,14 +449,14 @@ export function buildAgentTools(context: AgentContext) {
       inputSchema: z.object({
         change_id: z.number().describe("The control plane change ID to apply")
       }),
-      execute: async ({ change_id }) => {
+      execute: withToolTelemetry(context, "apply_control_plane_change", async ({ change_id }) => {
         const applied = applyControlPlaneChange(context.db, context.controlPlaneRoot, change_id);
         if (!applied.ok) return `Failed: ${applied.error}`;
         if (context.onControlPlaneChanged) {
           await context.onControlPlaneChanged();
         }
         return `Applied change #${change_id}.`;
-      }
+      })
     })
   };
 }

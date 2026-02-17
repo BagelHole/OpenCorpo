@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useOpenCorpo } from "@/context/OpenCorpoContext";
@@ -19,6 +19,8 @@ function shouldShowNavItem(item: UiSidebarItem, advancedMode: boolean) {
 
 export function App() {
   const state = useOpenCorpo();
+  const location = useLocation();
+  const LAST_PAGE_PATH_KEY = "opencorpo_last_page_path_v1";
   const [advancedMode, setAdvancedMode] = useState(() => {
     try {
       return localStorage.getItem("opencorpo_advanced_mode") === "true";
@@ -45,7 +47,25 @@ export function App() {
     for (const page of state.uiConfig.pages) map.set(page.id, page);
     return map;
   }, [state.uiConfig.pages]);
-  const defaultPath = navItems[0]?.path ?? "/";
+  const defaultPath = useMemo(() => {
+    const firstPath = navItems[0]?.path ?? "/";
+    try {
+      const stored = localStorage.getItem(LAST_PAGE_PATH_KEY);
+      if (stored && navItems.some((item) => item.path === stored)) return stored;
+    } catch {
+      // ignore storage read errors
+    }
+    return firstPath;
+  }, [navItems]);
+
+  useEffect(() => {
+    if (!navItems.some((item) => item.path === location.pathname)) return;
+    try {
+      localStorage.setItem(LAST_PAGE_PATH_KEY, location.pathname);
+    } catch {
+      // ignore storage write errors
+    }
+  }, [location.pathname, navItems]);
 
   const setAdvancedAndPersist = (next: boolean) => {
     setAdvancedMode(next);
@@ -109,9 +129,11 @@ export function App() {
           onboarding={state.onboarding}
           profile={state.profile}
           aiModelDefaults={state.aiModelDefaults}
+          scriptSecrets={state.scriptSecrets}
           persistOnboarding={state.persistOnboarding}
           onSaveProfile={state.saveProfile}
           onSaveAiModelDefaults={state.saveAiModelDefaults}
+          onSaveScriptSecret={state.saveScriptSecret}
           saveAiProvider={state.saveAiProvider}
           onRestartDaemon={state.restartDaemon}
           onRunDiagnostics={state.runDiagnosticsNow}

@@ -161,6 +161,16 @@ function normalizeSecretInput(value: string) {
     .replace(/^['"]+|['"]+$/g, "");
 }
 
+function normalizeScriptSecretName(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^\.+|\.+$/g, "");
+  return normalized;
+}
+
 type AiModelDefaults = {
   anthropic: string;
   openai: string;
@@ -537,6 +547,10 @@ app.post("/chat/messages", async ({ body }) => {
   const payload = asObject(body);
   const sessionId = Number(payload.sessionId);
   const content = typeof payload.content === "string" ? payload.content : "";
+  const requestId =
+    typeof payload.requestId === "string" && payload.requestId.trim()
+      ? payload.requestId.trim()
+      : undefined;
   const role =
     payload.role === "assistant" || payload.role === "system" ? payload.role : "user";
   const skipAgent = payload.skipAgent === true;
@@ -546,7 +560,10 @@ app.post("/chat/messages", async ({ body }) => {
   if (!session) return { ok: false, error: "session_not_found" };
 
   const messageId = addMessage(db, sessionId, role, content);
-  writeEvent(db, { type: "chat.message.created", data: { id: messageId } });
+  writeEvent(db, {
+    type: "chat.message.created",
+    data: { id: messageId, sessionId, requestId: requestId ?? null }
+  });
 
   if (skipAgent || role !== "user") {
     return { ok: true, messageId };
@@ -558,6 +575,8 @@ app.post("/chat/messages", async ({ body }) => {
     plugins,
     controlPlaneRoot: controlPlane.root,
     workspaceRoot,
+    chatSessionId: sessionId,
+    chatRequestId: requestId,
     handlerNames: Array.from(toolRegistry.handlers.keys()),
     onControlPlaneChanged: async () => {
       await rebuildRuntimeState();
@@ -590,7 +609,10 @@ app.post("/chat/messages", async ({ body }) => {
     reply = await runAgent(content, agentContext);
   }
   const assistantId = addMessage(db, sessionId, "assistant", reply.text, reply.metadata);
-  writeEvent(db, { type: "chat.response.created", data: { id: assistantId } });
+  writeEvent(db, {
+    type: "chat.response.created",
+    data: { id: assistantId, sessionId, requestId: requestId ?? null }
+  });
 
   return {
     ok: true,
@@ -602,6 +624,10 @@ app.post("/chat/messages", async ({ body }) => {
 
 app.post("/chat/stream", async ({ body }) => {
   const payload = asObject(body);
+  const requestId =
+    typeof payload.requestId === "string" && payload.requestId.trim()
+      ? payload.requestId.trim()
+      : undefined;
   const rawMessages = Array.isArray(payload.messages) ? payload.messages : [];
   // Pass through as UIMessage[] — the AI SDK's convertToModelMessages handles the conversion
   const messages = rawMessages as Array<{
@@ -617,6 +643,8 @@ app.post("/chat/stream", async ({ body }) => {
     plugins,
     controlPlaneRoot: controlPlane.root,
     workspaceRoot,
+    chatSessionId: undefined as number | undefined,
+    chatRequestId: requestId,
     handlerNames: Array.from(toolRegistry.handlers.keys()),
     onControlPlaneChanged: async () => {
       await rebuildRuntimeState();
@@ -625,6 +653,7 @@ app.post("/chat/stream", async ({ body }) => {
 
   const sessionId = Number(payload.sessionId);
   const session = Number.isFinite(sessionId) ? getSession(db, sessionId) : null;
+  if (session) agentContext.chatSessionId = session.id;
   const modelOverride =
     payload.model && typeof payload.model === "string"
       ? payload.model
@@ -1114,6 +1143,64 @@ app.get("/secrets", ({ query }) => {
     items: listSecrets(db, limit)
   };
 });
+
+app.get("/secrets/script", () => {
+  const items = listSecrets(db, 500)
+    .filter((item: any) => typeof item.name === "string" && item.name.startsWith("script."))
+    .map((item: any) => {
+      const metadata =
+        item.metadata && typeof item.metadata === "object"
+          ? (item.metadata as Record<string, unknown>)
+          : {};
+      return {
+        name: String(item.name),
+        ref: String(item.ref),
+        provider: String(item.provider),
+        updatedAt: String(item.updated_at),
+        description:
+          typeof metadata.description === "string" ? metadata.description : ""
+      };
+    })
+    .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
+  return { ok: true, items };
+});
+
+app.post("/secrets/script", ({ body }) => {
+  const payload = asObject(body);
+  const rawName = typeof payload.name === "string" ? payload.name : "";
+  const value =
+    typeof payload.value === "string" ? normalizeSecretInput(payload.value) : "";
+  const description =
+    typeof payload.description === "string" ? payload.description.trim() : "";
+  if (!rawName.trim()) return { ok: false, error: "name_required" };
+  if (!value) return { ok: false, error: "value_required" };
+  const normalizedName = normalizeScriptSecretName(rawName);
+  if (!normalizedName) return { ok: false, error: "invalid_name" };
+  const name = `script.${normalizedName}`;
+  const saved = setSecretRef(db, {
+    name,
+    value,
+    provider: "local_file",
+    metadata: {
+      description,
+      scope: "script_secret"
+    }
+  });
+  writeAudit(db, {
+    actor: "user",
+    action: "script_secret_saved",
+    metadata: { name }
+  });
+  return {
+    ok: true,
+    item: {
+      name,
+      ref: saved.ref,
+      description
+    }
+  };
+});
+
 app.get("/secrets/ai-key/status", () => {
   const hasKey = Boolean(
     process.env.AI_GATEWAY_API_KEY ??

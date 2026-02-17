@@ -31,6 +31,17 @@ export type AgentReply = {
   metadata?: Record<string, unknown>;
 };
 
+export type AgentToolEvent = {
+  phase: "started" | "completed" | "failed";
+  tool: string;
+  at: string;
+  requestId?: string;
+  sessionId?: number;
+  inputPreview?: string;
+  outputPreview?: string;
+  error?: string;
+};
+
 export type PluginSummary = {
   name: string;
   version: string;
@@ -44,6 +55,12 @@ export type AgentContext = {
   plugins: PluginSummary[];
   controlPlaneRoot: string;
   workspaceRoot: string;
+  /** Chat session id for tool execution telemetry. */
+  chatSessionId?: number;
+  /** Client-provided request id for correlating tool execution telemetry. */
+  chatRequestId?: string;
+  /** Optional callback for tool execution events emitted while the LLM runs. */
+  onAgentToolEvent?: (event: AgentToolEvent) => void;
   /** Tool names that have plugin handlers (for list_available_handlers) */
   handlerNames?: string[];
   /** Called after control-plane changes are applied so runtime caches are refreshed. */

@@ -24,7 +24,38 @@ export type JobRunRow = {
 type JobStep = {
   tool: string;
   with?: Record<string, unknown>;
+  args?: Record<string, unknown>;
 };
+
+function toCanonicalToolName(name: string) {
+  return name.trim().toLowerCase().replace(/[_.-]+/g, ".");
+}
+
+function toCamelKey(key: string) {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+function normalizeStepInput(input?: Record<string, unknown>) {
+  if (!input || typeof input !== "object") return input;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    normalized[toCamelKey(key)] = value;
+  }
+  return normalized;
+}
+
+function normalizeJobStep(step: JobStep): JobStep {
+  const rawInput =
+    step.with && typeof step.with === "object"
+      ? step.with
+      : step.args && typeof step.args === "object"
+        ? step.args
+        : undefined;
+  return {
+    tool: toCanonicalToolName(step.tool),
+    with: normalizeStepInput(rawInput)
+  };
+}
 
 export function listJobRuns(db: DbHandle, limit = 100) {
   const stmt = db.prepare(
@@ -158,7 +189,7 @@ export async function processQueuedRuns(
     let stepIndex = state.stepIndex ?? 0;
 
     for (let i = stepIndex; i < steps.length; i += 1) {
-      const step = steps[i];
+      const step = normalizeJobStep(steps[i]);
       const tool = findTool(registry.definitions, step.tool);
       if (!tool) {
         outputs.push({ error: "tool_not_found", tool: step.tool });

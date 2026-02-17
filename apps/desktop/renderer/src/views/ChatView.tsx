@@ -101,6 +101,16 @@ export function ChatView() {
   const JUMP_TO_LATEST_THRESHOLD_PX = 120;
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [agentProgressExpanded, setAgentProgressExpanded] = useState(true);
+  const [agentProgress, setAgentProgress] = useState<
+    Array<{
+      id: number;
+      phase: "started" | "completed" | "failed";
+      tool: string;
+      detail: string;
+      at: string;
+    }>
+  >([]);
   const [tabMenu, setTabMenu] = useState<{ sessionId: number; x: number; y: number } | null>(
     null
   );
@@ -115,6 +125,7 @@ export function ChatView() {
   const tabMenuRef = useRef<HTMLDivElement | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const progressIdRef = useRef(1);
   const stickToBottomRef = useRef(true);
   const activeSession = useMemo(
     () => state.chatSessions.find((session) => session.id === state.activeChatSessionId) ?? null,
@@ -310,6 +321,12 @@ export function ChatView() {
   useEffect(() => {
     const container = chatScrollRef.current;
     if (!container) return;
+    if (sending) {
+      scrollChatToBottom("auto");
+      stickToBottomRef.current = true;
+      setShowJumpToLatest(false);
+      return;
+    }
     const distanceFromBottom =
       container.scrollHeight - (container.scrollTop + container.clientHeight);
     const shouldStick =
@@ -323,10 +340,54 @@ export function ChatView() {
     }
   }, [
     JUMP_TO_LATEST_THRESHOLD_PX,
+    agentProgress.length,
     lastMessageSignature,
     sending,
     state.chatMessages.length,
   ]);
+
+  const toolLabel = (tool: string) => {
+    const map: Record<string, string> = {
+      get_status: "Checking status",
+      get_approvals: "Checking approvals",
+      list_jobs: "Checking jobs",
+      list_job_runs: "Checking job runs",
+      run_job: "Queueing job",
+      enable_job: "Enabling job",
+      disable_job: "Disabling job",
+      list_audit: "Checking audit",
+      list_tools: "Checking tools",
+      list_plugins: "Checking plugins",
+      web_search: "Searching web",
+      http_get: "Reading URL",
+      get_control_plane_json: "Reading config",
+      propose_config_change: "Updating config",
+      get_ui_schema: "Reading UI schema",
+      list_available_handlers: "Checking handlers",
+      get_tool_schema: "Reading tool schema",
+      apply_control_plane_change: "Applying config change",
+      propose_code_change: "Preparing code patch"
+    };
+    return map[tool] ?? `Running ${tool}`;
+  };
+
+  const formatToolProgress = (
+    phase: "started" | "completed" | "failed",
+    tool: string,
+    inputPreview?: string | null,
+    outputPreview?: string | null,
+    error?: string | null
+  ) => {
+    const label = toolLabel(tool);
+    if (phase === "started") {
+      return `${label}...`;
+    }
+    if (phase === "completed") {
+      return `${label} done`;
+    }
+    if (error?.trim()) return `${label} failed (${error.trim()})`;
+    return `${label} failed`;
+  };
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -593,8 +654,32 @@ export function ChatView() {
                 </div>
               ))}
               {sending && (
-                <div className="max-w-2xl rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] px-4 py-3 text-sm text-[var(--oc-ink-muted)] oc-pulse">
-                  Working on it...
+                <div className="max-w-2xl rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] px-4 py-3 text-sm text-[var(--oc-ink-muted)]">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-left text-sm text-[var(--oc-ink)]"
+                    onClick={() => setAgentProgressExpanded((current) => !current)}
+                  >
+                    <span>Working on it...</span>
+                    <span className="text-xs text-[var(--oc-ink-muted)]">
+                      {agentProgressExpanded ? "Hide details" : "Show details"}
+                    </span>
+                  </button>
+                  {agentProgressExpanded && (
+                    <div className="mt-2 space-y-1 text-xs">
+                      {agentProgress.length === 0 ? (
+                        <div className="oc-pulse text-[var(--oc-ink-muted)]">
+                          Planning request and selecting tools...
+                        </div>
+                      ) : (
+                        agentProgress.slice(-6).map((entry) => (
+                          <div key={entry.id} className="rounded border border-[var(--oc-border)] bg-[var(--oc-bg)] px-2 py-1">
+                            {entry.phase === "failed" ? "x" : entry.phase === "completed" ? "[ok]" : "..."} {entry.detail}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -632,8 +717,37 @@ export function ChatView() {
                   model: selectedModelValue || undefined,
                 });
                 setSending(true);
+                setAgentProgressExpanded(true);
+                setAgentProgress([
+                  {
+                    id: progressIdRef.current++,
+                    phase: "started",
+                    tool: "planner",
+                    detail: "Analyzing request and preparing execution plan",
+                    at: new Date().toISOString(),
+                  },
+                ]);
                 setInput("");
-                await state.sendChatMessage(text);
+                await state.sendChatMessage(text, {
+                  onAgentProgress: (event) => {
+                    setAgentProgress((current) => [
+                      ...current,
+                      {
+                        id: progressIdRef.current++,
+                        phase: event.phase,
+                        tool: event.tool,
+                        detail: formatToolProgress(
+                          event.phase,
+                          event.tool,
+                          event.inputPreview,
+                          event.outputPreview,
+                          event.error
+                        ),
+                        at: event.at,
+                      },
+                    ]);
+                  },
+                });
                 setSending(false);
               }}
               className="space-y-3"
@@ -651,8 +765,39 @@ export function ChatView() {
                       model: selectedModelValue || undefined,
                     });
                     setSending(true);
+                    setAgentProgressExpanded(true);
+                    setAgentProgress([
+                      {
+                        id: progressIdRef.current++,
+                        phase: "started",
+                        tool: "planner",
+                        detail: "Analyzing request and preparing execution plan",
+                        at: new Date().toISOString(),
+                      },
+                    ]);
                     setInput("");
-                    void state.sendChatMessage(text).finally(() => setSending(false));
+                    void state
+                      .sendChatMessage(text, {
+                        onAgentProgress: (event) => {
+                          setAgentProgress((current) => [
+                            ...current,
+                            {
+                              id: progressIdRef.current++,
+                              phase: event.phase,
+                              tool: event.tool,
+                              detail: formatToolProgress(
+                                event.phase,
+                                event.tool,
+                                event.inputPreview,
+                                event.outputPreview,
+                                event.error
+                              ),
+                              at: event.at,
+                            },
+                          ]);
+                        },
+                      })
+                      .finally(() => setSending(false));
                   }
                 }}
                 rows={3}
