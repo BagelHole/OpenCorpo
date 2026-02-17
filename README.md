@@ -4,6 +4,29 @@ OpenCorpo is a local-first, enterprise-ready business operating system powered b
 
 This is a chatbot and a self-configuring business OS with security and auditing.
 
+## Early Beta Warning
+
+OpenCorpo is in **very early beta**.
+
+What this means right now:
+
+- breaking changes are expected
+- schemas, APIs, and config formats can change without notice
+- features may be incomplete or unstable
+- documentation may lag behind the latest code
+- data migrations may be imperfect between versions
+
+If you use OpenCorpo today, treat it as an experimental system and avoid relying on it for production-critical workflows.
+
+## Open Source Project Notes
+
+OpenCorpo is open source and community contributions are welcome.
+
+- use Issues for bugs, regressions, and feature proposals
+- use PRs for focused changes with clear scope
+- prefer small, reviewable patches over large refactors
+- expect maintainers to prioritize safety, auditability, and local-first behavior over feature speed
+
 ## Core vision
 
 Let the AI work on the system without making the system dangerous.
@@ -407,7 +430,15 @@ A user can:
 
 ## Status
 
-Active desktop-first rebuild. The app focuses on non-technical onboarding, daemon auto-supervision, diagnostics, and safe self-edit workflows. The desktop shell and daemon both live in this repository under `apps/desktop` and `apps/daemon`.
+**Very early beta (active rebuild).**
+
+Current focus:
+
+- desktop-first onboarding and local daemon supervision
+- diagnostics and recovery workflows
+- safe self-edit and control-plane mutation flows
+
+The desktop shell and daemon both live in this repository under `apps/desktop` and `apps/daemon`.
 
 ## Immediate next steps (coding agent)
 
