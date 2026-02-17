@@ -299,6 +299,39 @@ export class OpenCorpoApi {
     );
   }
 
+  async resolveWidgetProps(input: { props: Record<string, unknown> }) {
+    return this.post<{
+      ok: boolean;
+      props: Record<string, unknown>;
+      resolvedSecrets: string[];
+    }>("/widgets/resolve-props", input);
+  }
+
+  async createTerminalSession(input: { command: string; cwd?: string; allowInput?: boolean }) {
+    return this.post<{
+      ok: boolean;
+      sessionId: string;
+      createdAt: string;
+    }>("/terminal/sessions", input);
+  }
+
+  async getTerminalSessionEvents(sessionId: string, cursor = 0) {
+    return this.get<{
+      ok: boolean;
+      sessionId: string;
+      events: Array<{ cursor: number; stream: "stdout" | "stderr" | "status"; data: string; ts: string }>;
+      nextCursor: number;
+      closed: boolean;
+      exitCode: number | null;
+    }>(`/terminal/sessions/${encodeURIComponent(sessionId)}/events?cursor=${cursor}`);
+  }
+
+  async sendTerminalSessionInput(sessionId: string, data: string) {
+    return this.post<{ ok: boolean }>(`/terminal/sessions/${encodeURIComponent(sessionId)}/input`, {
+      data
+    });
+  }
+
   // Diagnostics
   async runDiagnostics() {
     return this.get<{ report: DiagnosticsReport }>("/diagnostics");
@@ -431,6 +464,50 @@ export type UiBaseBlock =
       columns?: string[];
       emptyText?: string;
       source?: "auto" | "output" | "outputs";
+    }
+  | {
+      type: "actions";
+      title?: string;
+      description?: string;
+      buttons: Array<{
+        label: string;
+        style?: "primary" | "secondary" | "outline";
+        action:
+          | {
+              type: "run_job";
+              jobName: string;
+              confirm?: string;
+            }
+          | {
+              type: "open_url";
+              url: string;
+            };
+      }>;
+    }
+  | {
+      type: "react_widget";
+      title?: string;
+      description?: string;
+      package: string;
+      exportName?: string;
+      props?: Record<string, unknown>;
+      height?: number;
+    }
+  | {
+      type: "terminal_widget";
+      title?: string;
+      description?: string;
+      command: string;
+      cwd?: string;
+      height?: number;
+      allowInput?: boolean;
+    }
+  | {
+      type: "web_embed";
+      title?: string;
+      description?: string;
+      url: string;
+      height?: number;
     };
 
 export type UiBasePage = {

@@ -48,7 +48,13 @@
         "path": { "type": "string", "minLength": 1 },
         "args": { "type": "array", "items": { "type": ["string", "number", "boolean"] } },
         "timeout_ms": { "type": "number", "minimum": 1000 },
-        "env": { "type": "object" }
+        "env": { "type": "object" },
+        "dependencies": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "dependency_install_timeout_ms": { "type": "number", "minimum": 1000, "maximum": 300000 }
       },
       "additionalProperties": false
     },

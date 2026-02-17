@@ -510,80 +510,82 @@ export function ChatView() {
       <Card className="flex min-h-0 flex-1 flex-col">
         <CardContent className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
           <div className="space-y-3">
-            <div
-              ref={tabStripRef}
-              onWheel={handleTabStripWheel}
-              className="oc-scrollbar-subtle flex items-center gap-2 overflow-x-auto border-b border-[var(--oc-border)] pb-2"
-            >
-              {state.chatSessions.map((session) => (
-                <div key={session.id} className="group relative shrink-0">
-                  <button
-                    draggable
-                    onDragStart={() => {
-                      setDraggingSessionId(session.id);
-                      setDragOverSessionId(session.id);
-                    }}
-                    onDragEnter={() => setDragOverSessionId(session.id)}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(event) => handleTabDrop(event, session.id)}
-                    onDragEnd={() => {
-                      setDraggingSessionId(null);
-                      setDragOverSessionId(null);
-                    }}
-                    onClick={() => void state.selectChatSession(session.id)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      void state.selectChatSession(session.id);
-                      setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY });
-                    }}
-                    className={cn(
-                      "flex h-8 min-w-[140px] items-center gap-2 rounded-md border px-2.5 pr-7 text-left text-xs transition",
-                      draggingSessionId === session.id ? "cursor-grabbing opacity-70" : "cursor-grab",
-                      dragOverSessionId === session.id &&
-                        draggingSessionId !== null &&
-                        draggingSessionId !== session.id &&
-                        "ring-1 ring-[var(--oc-border-strong)]",
-                      state.activeChatSessionId === session.id
-                        ? "text-[var(--oc-ink)]"
-                        : "border-transparent text-[var(--oc-ink-muted)] hover:border-[var(--oc-border)] hover:bg-[var(--oc-bg)] hover:text-[var(--oc-ink)]"
-                    )}
-                    style={
-                      state.activeChatSessionId === session.id
-                        ? {
-                            borderColor: withAlpha(resolveTabColor(session.metadata.color), 0.55),
-                            backgroundColor: withAlpha(resolveTabColor(session.metadata.color), 0.16),
-                          }
-                        : undefined
-                    }
-                  >
-                    <span
-                      className="h-2 w-2 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: resolveTabColor(session.metadata.color) }}
-                    />
-                    <span>{session.metadata.emoji ?? "💬"}</span>
-                    <span className="truncate">{session.title}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      confirmDeleteSession(session.id, session.title);
-                    }}
-                    className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[11px] text-[var(--oc-ink-muted)] opacity-0 transition hover:bg-[var(--oc-danger-bg)] hover:text-[var(--oc-danger)] group-hover:opacity-100"
-                    aria-label={`Delete ${session.title}`}
-                    title="Delete tab and history"
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
+            <div className="flex items-center gap-2 border-b border-[var(--oc-border)] pb-2">
+              <div
+                ref={tabStripRef}
+                onWheel={handleTabStripWheel}
+                className="oc-scrollbar-subtle flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
+              >
+                {state.chatSessions.map((session) => (
+                  <div key={session.id} className="group relative shrink-0">
+                    <button
+                      draggable
+                      onDragStart={() => {
+                        setDraggingSessionId(session.id);
+                        setDragOverSessionId(session.id);
+                      }}
+                      onDragEnter={() => setDragOverSessionId(session.id)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(event) => handleTabDrop(event, session.id)}
+                      onDragEnd={() => {
+                        setDraggingSessionId(null);
+                        setDragOverSessionId(null);
+                      }}
+                      onClick={() => void state.selectChatSession(session.id)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        void state.selectChatSession(session.id);
+                        setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY });
+                      }}
+                      className={cn(
+                        "flex h-8 min-w-[140px] items-center gap-2 rounded-md border px-2.5 pr-7 text-left text-xs transition",
+                        draggingSessionId === session.id ? "cursor-grabbing opacity-70" : "cursor-grab",
+                        dragOverSessionId === session.id &&
+                          draggingSessionId !== null &&
+                          draggingSessionId !== session.id &&
+                          "ring-1 ring-[var(--oc-border-strong)]",
+                        state.activeChatSessionId === session.id
+                          ? "text-[var(--oc-ink)]"
+                          : "border-transparent text-[var(--oc-ink-muted)] hover:border-[var(--oc-border)] hover:bg-[var(--oc-bg)] hover:text-[var(--oc-ink)]"
+                      )}
+                      style={
+                        state.activeChatSessionId === session.id
+                          ? {
+                              borderColor: withAlpha(resolveTabColor(session.metadata.color), 0.55),
+                              backgroundColor: withAlpha(resolveTabColor(session.metadata.color), 0.16),
+                            }
+                          : undefined
+                      }
+                    >
+                      <span
+                        className="h-2 w-2 flex-shrink-0 rounded-full"
+                        style={{ backgroundColor: resolveTabColor(session.metadata.color) }}
+                      />
+                      <span>{session.metadata.emoji ?? "💬"}</span>
+                      <span className="truncate">{session.title}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        confirmDeleteSession(session.id, session.title);
+                      }}
+                      className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[11px] text-[var(--oc-ink-muted)] opacity-0 transition hover:bg-[var(--oc-danger-bg)] hover:text-[var(--oc-danger)] group-hover:opacity-100"
+                      aria-label={`Delete ${session.title}`}
+                      title="Delete tab and history"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
               <Button
                 size="sm"
                 variant="secondary"
-                className="h-8 shrink-0 px-3 text-xs"
+                className="h-8 shrink-0 px-3 text-base leading-none"
                 onClick={() => {
                   const last = readLastChatSelection();
                   const providerId =
@@ -604,8 +606,10 @@ export function ChatView() {
                     metadata: { emoji: "💬", color: "slate", provider: providerId, model },
                   });
                 }}
+                aria-label="New tab"
+                title="New tab"
               >
-                New tab
+                +
               </Button>
             </div>
           </div>

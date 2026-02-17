@@ -15,6 +15,10 @@ export const configRoot = process.env.OPENCORPO_CONFIG_DIR
   ? resolve(process.env.OPENCORPO_CONFIG_DIR)
   : resolve(projectRoot, "config");
 
+export const schemaRoot = process.env.OPENCORPO_SCHEMA_DIR
+  ? resolve(process.env.OPENCORPO_SCHEMA_DIR)
+  : resolve(projectRoot, "config", "schemas");
+
 export const pluginsRoot = process.env.OPENCORPO_PLUGINS_DIR
   ? resolve(process.env.OPENCORPO_PLUGINS_DIR)
   : resolve(projectRoot, "plugins");

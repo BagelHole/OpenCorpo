@@ -1,5 +1,8 @@
 import { Elysia } from "elysia";
 import { TextEncoder } from "node:util";
+import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { ensureSchema, openDb } from "./db";
 import {
   getAuditById,
@@ -135,6 +138,87 @@ const corsHeaders: Record<string, string> = {
   "access-control-allow-headers": "authorization,content-type,x-oc-session"
 };
 
+type TerminalEvent = {
+  cursor: number;
+  stream: "stdout" | "stderr" | "status";
+  data: string;
+  ts: string;
+};
+
+type TerminalSession = {
+  id: string;
+  createdAt: string;
+  command: string;
+  cwd: string;
+  allowInput: boolean;
+  process: ChildProcessWithoutNullStreams;
+  events: TerminalEvent[];
+  nextCursor: number;
+  closed: boolean;
+  exitCode: number | null;
+};
+
+const terminalSessions = new Map<string, TerminalSession>();
+const MAX_TERMINAL_SESSIONS = 20;
+const MAX_TERMINAL_EVENTS = 3000;
+const MAX_TERMINAL_INPUT = 8192;
+const MAX_TERMINAL_COMMAND = 2000;
+const MAX_TERMINAL_CWD = 512;
+
+function isPathInside(base: string, target: string) {
+  const rel = relative(base, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function resolveTerminalCwd(input: string | undefined) {
+  if (!input) return workspaceRoot;
+  const trimmed = input.trim();
+  if (!trimmed) return workspaceRoot;
+  if (trimmed.length > MAX_TERMINAL_CWD) return null;
+  const absolute = isAbsolute(trimmed) ? trimmed : resolvePath(workspaceRoot, trimmed);
+  if (!isPathInside(workspaceRoot, absolute)) return null;
+  return absolute;
+}
+
+function appendTerminalEvent(session: TerminalSession, stream: TerminalEvent["stream"], data: string) {
+  const text = typeof data === "string" ? data : String(data ?? "");
+  if (!text) return;
+  session.events.push({
+    cursor: session.nextCursor,
+    stream,
+    data: text,
+    ts: new Date().toISOString()
+  });
+  session.nextCursor += 1;
+  if (session.events.length > MAX_TERMINAL_EVENTS) {
+    session.events.splice(0, session.events.length - MAX_TERMINAL_EVENTS);
+  }
+}
+
+function closeTerminalSession(session: TerminalSession, exitCode: number | null) {
+  if (session.closed) return;
+  session.closed = true;
+  session.exitCode = exitCode;
+  appendTerminalEvent(
+    session,
+    "status",
+    exitCode == null ? "terminal session closed" : `terminal exited with code ${exitCode}`
+  );
+}
+
+function pruneTerminalSessions() {
+  while (terminalSessions.size >= MAX_TERMINAL_SESSIONS) {
+    const oldestKey = terminalSessions.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    const oldest = terminalSessions.get(oldestKey);
+    if (oldest && !oldest.closed) {
+      oldest.process.kill("SIGTERM");
+      closeTerminalSession(oldest, oldest.exitCode);
+    }
+    terminalSessions.delete(oldestKey);
+  }
+}
+
 function allCapabilities() {
   return Array.from(
     new Set(
@@ -180,10 +264,64 @@ function normalizeScriptSecretName(value: string) {
   const normalized = value
     .trim()
     .toLowerCase()
+    .replace(/^script\./, "")
     .replace(/[^a-z0-9._-]/g, "_")
     .replace(/_{2,}/g, "_")
     .replace(/^\.+|\.+$/g, "");
   return normalized;
+}
+
+type WidgetPropsResolveResult =
+  | { ok: true; value: unknown; resolvedSecrets: Set<string> }
+  | { ok: false; error: string };
+
+function resolveWidgetSecretPlaceholders(
+  value: unknown,
+  depth: number,
+  resolvedSecrets: Set<string>
+): WidgetPropsResolveResult {
+  if (depth > 12) {
+    return { ok: false, error: "widget_props_too_deep" };
+  }
+  if (value === null || value === undefined) {
+    return { ok: true, value, resolvedSecrets };
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    for (const item of value) {
+      const result = resolveWidgetSecretPlaceholders(item, depth + 1, resolvedSecrets);
+      if (!result.ok) return result;
+      out.push(result.value);
+    }
+    return { ok: true, value: out, resolvedSecrets };
+  }
+  if (typeof value !== "object") {
+    return { ok: true, value, resolvedSecrets };
+  }
+
+  const row = value as Record<string, unknown>;
+  const keys = Object.keys(row);
+  if (keys.length === 1 && keys[0] === "$secret") {
+    const secretName = typeof row.$secret === "string" ? row.$secret.trim() : "";
+    if (!secretName) return { ok: false, error: "widget_secret_name_required" };
+    if (!secretName.startsWith("script.")) {
+      return { ok: false, error: `widget_secret_not_allowed:${secretName}` };
+    }
+    const secretValue = getSecretValue(db, secretName);
+    if (secretValue == null) {
+      return { ok: false, error: `widget_secret_not_found:${secretName}` };
+    }
+    resolvedSecrets.add(secretName);
+    return { ok: true, value: secretValue.trim(), resolvedSecrets };
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nestedValue] of Object.entries(row)) {
+    const result = resolveWidgetSecretPlaceholders(nestedValue, depth + 1, resolvedSecrets);
+    if (!result.ok) return result;
+    out[key] = result.value;
+  }
+  return { ok: true, value: out, resolvedSecrets };
 }
 
 type AiModelDefaults = {
@@ -1114,6 +1252,146 @@ app.post("/jobs/:id/disable", ({ params }) => {
 
 app.get("/control-plane", () => ({ ok: true, ...controlPlane }));
 app.get("/ui/config", () => ({ ok: true, config: uiConfig }));
+app.post("/widgets/resolve-props", ({ body }) => {
+  const payload = asObject(body);
+  const props =
+    payload.props && typeof payload.props === "object"
+      ? (payload.props as Record<string, unknown>)
+      : null;
+  if (!props) return { ok: false, error: "props_required" };
+
+  const resolvedSecrets = new Set<string>();
+  const resolved = resolveWidgetSecretPlaceholders(props, 0, resolvedSecrets);
+  if (!resolved.ok) {
+    return { ok: false, error: resolved.error };
+  }
+
+  if (resolvedSecrets.size > 0) {
+    writeAudit(db, {
+      actor: "user",
+      action: "widget_props_secret_resolved",
+      metadata: {
+        secretCount: resolvedSecrets.size,
+        secrets: Array.from(resolvedSecrets).sort()
+      }
+    });
+  }
+
+  return {
+    ok: true,
+    props: resolved.value,
+    resolvedSecrets: Array.from(resolvedSecrets).sort()
+  };
+});
+
+app.post("/terminal/sessions", ({ body, set }) => {
+  const payload = asObject(body);
+  const command = typeof payload.command === "string" ? payload.command.trim() : "";
+  if (!command) return { ok: false, error: "command_required" };
+  if (command.length > MAX_TERMINAL_COMMAND) return { ok: false, error: "command_too_long" };
+  if (/[\r\n\0]/.test(command)) return { ok: false, error: "invalid_command" };
+
+  const cwdInput = typeof payload.cwd === "string" ? payload.cwd : undefined;
+  const cwd = resolveTerminalCwd(cwdInput);
+  if (!cwd) return { ok: false, error: "invalid_cwd" };
+
+  const allowInput = payload.allowInput === true;
+  pruneTerminalSessions();
+  const sessionId = randomUUID();
+  const createdAt = new Date().toISOString();
+  try {
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      stdio: "pipe",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0"
+      }
+    });
+    const session: TerminalSession = {
+      id: sessionId,
+      createdAt,
+      command,
+      cwd,
+      allowInput,
+      process: child,
+      events: [],
+      nextCursor: 0,
+      closed: false,
+      exitCode: null
+    };
+    terminalSessions.set(sessionId, session);
+
+    appendTerminalEvent(session, "status", `$ ${command}`);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string | Buffer) => {
+      appendTerminalEvent(session, "stdout", typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+    child.stderr.on("data", (chunk: string | Buffer) => {
+      appendTerminalEvent(session, "stderr", typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+    child.on("error", (error) => {
+      appendTerminalEvent(session, "stderr", `spawn_failed: ${error.message}`);
+      closeTerminalSession(session, null);
+    });
+    child.on("exit", (code) => {
+      closeTerminalSession(session, typeof code === "number" ? code : null);
+    });
+
+    writeAudit(db, {
+      actor: "user",
+      action: "terminal_session_started",
+      metadata: { sessionId, command, cwd, allowInput }
+    });
+    writeEvent(db, {
+      type: "terminal.session.started",
+      data: { sessionId, command, cwd, allowInput }
+    });
+    return { ok: true, sessionId, createdAt };
+  } catch (error) {
+    set.status = 400;
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "terminal_spawn_failed"
+    };
+  }
+});
+
+app.get("/terminal/sessions/:id/events", ({ params, query }) => {
+  const id = String(params.id ?? "");
+  const session = terminalSessions.get(id);
+  if (!session) return { ok: false, error: "session_not_found" };
+  const cursorInput = Number(query?.cursor ?? 0);
+  const cursor = Number.isFinite(cursorInput) && cursorInput >= 0 ? Math.floor(cursorInput) : 0;
+  const events = session.events.filter((event) => event.cursor >= cursor);
+  return {
+    ok: true,
+    sessionId: session.id,
+    events,
+    nextCursor: session.nextCursor,
+    closed: session.closed,
+    exitCode: session.exitCode
+  };
+});
+
+app.post("/terminal/sessions/:id/input", ({ params, body }) => {
+  const id = String(params.id ?? "");
+  const session = terminalSessions.get(id);
+  if (!session) return { ok: false, error: "session_not_found" };
+  if (!session.allowInput) return { ok: false, error: "input_not_allowed" };
+  if (session.closed) return { ok: false, error: "session_closed" };
+
+  const payload = asObject(body);
+  const data = typeof payload.data === "string" ? payload.data : "";
+  if (!data) return { ok: false, error: "input_required" };
+  if (data.length > MAX_TERMINAL_INPUT) return { ok: false, error: "input_too_large" };
+  session.process.stdin.write(data);
+  return { ok: true };
+});
+
 app.post("/control-plane/reload", async () => {
   await rebuildRuntimeState();
   writeAudit(db, {

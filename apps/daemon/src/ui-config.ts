@@ -57,6 +57,50 @@ export type UiBaseBlock =
       columns?: string[];
       emptyText?: string;
       source?: "auto" | "output" | "outputs";
+    }
+  | {
+      type: "actions";
+      title?: string;
+      description?: string;
+      buttons: Array<{
+        label: string;
+        style?: "primary" | "secondary" | "outline";
+        action:
+          | {
+              type: "run_job";
+              jobName: string;
+              confirm?: string;
+            }
+          | {
+              type: "open_url";
+              url: string;
+            };
+      }>;
+    }
+  | {
+      type: "react_widget";
+      title?: string;
+      description?: string;
+      package: string;
+      exportName?: string;
+      props?: Record<string, unknown>;
+      height?: number;
+    }
+  | {
+      type: "terminal_widget";
+      title?: string;
+      description?: string;
+      command: string;
+      cwd?: string;
+      height?: number;
+      allowInput?: boolean;
+    }
+  | {
+      type: "web_embed";
+      title?: string;
+      description?: string;
+      url: string;
+      height?: number;
     };
 
 export type UiBasePage = {
@@ -105,6 +149,50 @@ const FALLBACK_UI_CONFIG: UiConfig = {
   ]
 };
 
+function sanitizeUiConfig(config: UiConfig): UiConfig {
+  const pages = Array.isArray(config.pages) ? config.pages : [];
+  const sidebarItems = Array.isArray(config.sidebar?.items) ? config.sidebar.items : [];
+  const pageIds = new Set<string>();
+  const cleanPages: UiPage[] = [];
+  for (const page of pages) {
+    if (!page || typeof page !== "object") continue;
+    const id = typeof page.id === "string" ? page.id.trim() : "";
+    if (!id || pageIds.has(id)) continue;
+    pageIds.add(id);
+    cleanPages.push(page);
+  }
+
+  const seenSidebarId = new Set<string>();
+  const seenSidebarPath = new Set<string>();
+  const cleanSidebar: UiSidebarItem[] = [];
+  for (const item of sidebarItems) {
+    if (!item || typeof item !== "object") continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const path = typeof item.path === "string" ? item.path.trim() : "";
+    const pageId = typeof item.pageId === "string" ? item.pageId.trim() : "";
+    if (!id || !path || !pageId) continue;
+    if (!pageIds.has(pageId)) continue;
+    if (seenSidebarId.has(id) || seenSidebarPath.has(path)) continue;
+    seenSidebarId.add(id);
+    seenSidebarPath.add(path);
+    cleanSidebar.push(item);
+  }
+
+  if (cleanPages.length === 0 || cleanSidebar.length === 0) {
+    return FALLBACK_UI_CONFIG;
+  }
+
+  return {
+    name: typeof config.name === "string" && config.name.trim() ? config.name : "desktop-default",
+    sidebar: {
+      collapsible: Boolean(config.sidebar?.collapsible),
+      defaultCollapsed: Boolean(config.sidebar?.defaultCollapsed),
+      items: cleanSidebar
+    },
+    pages: cleanPages
+  };
+}
+
 export function loadUiConfig(configRoot: string): UiConfig {
   const uiDir = resolve(configRoot, "ui");
   try {
@@ -114,7 +202,7 @@ export function loadUiConfig(configRoot: string): UiConfig {
     if (files.length === 0) return FALLBACK_UI_CONFIG;
     const preferred = files.includes("desktop.json") ? "desktop.json" : files[0];
     const raw = readFileSync(join(uiDir, preferred), "utf-8");
-    return JSON.parse(raw) as UiConfig;
+    return sanitizeUiConfig(JSON.parse(raw) as UiConfig);
   } catch {
     return FALLBACK_UI_CONFIG;
   }

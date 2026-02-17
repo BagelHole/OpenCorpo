@@ -519,13 +519,15 @@ export function SettingsView({
             {scriptSecrets.map((secret) => (
               <div
                 key={secret.name}
-                className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2"
+                className="overflow-hidden rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2"
               >
-                <div className="text-xs font-semibold text-[var(--oc-ink)]">{secret.name}</div>
+                <div className="break-all text-xs font-semibold text-[var(--oc-ink)]">{secret.name}</div>
                 {secret.description && (
                   <div className="mt-0.5 text-xs text-[var(--oc-ink-muted)]">{secret.description}</div>
                 )}
-                <div className="mt-1 text-[11px] text-[var(--oc-ink-muted)]">{secret.ref}</div>
+                <div className="mt-1 break-all text-[11px] leading-4 text-[var(--oc-ink-muted)]">
+                  {secret.ref}
+                </div>
               </div>
             ))}
           </div>

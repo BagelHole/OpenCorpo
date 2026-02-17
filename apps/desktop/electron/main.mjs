@@ -52,6 +52,32 @@ let daemonProcess = null;
 let daemonRestartTimer = null;
 let daemonRestartAttempts = 0;
 let mainWindow = null;
+let securityHooksInstalled = false;
+
+function installSessionSecurityHooks() {
+  if (securityHooksInstalled) return;
+  const ses = BrowserWindow.getAllWindows()[0]?.webContents?.session;
+  const targetSession = ses ?? (BrowserWindow.getFocusedWindow()?.webContents?.session ?? null);
+  if (!targetSession) return;
+  securityHooksInstalled = true;
+
+  // Allow gamepad/pointer-lock/fullscreen in embedded widgets by relaxing restrictive headers.
+  targetSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = details.responseHeaders ?? {};
+    delete headers["Permissions-Policy"];
+    delete headers["permissions-policy"];
+    headers["Permissions-Policy"] = [
+      "gamepad=*, fullscreen=*, pointer-lock=*, clipboard-read=*, clipboard-write=*"
+    ];
+    callback({ responseHeaders: headers });
+  });
+
+  // Explicitly allow the gamepad permission check in Electron/Chromium.
+  targetSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === "gamepad") return true;
+    return true;
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -464,10 +490,12 @@ app.whenReady().then(() => {
   // In dev, always force a fresh daemon so code/env changes apply immediately.
   void startDaemon({ forceRestart: isDev });
   createWindow();
+  installSessionSecurityHooks();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      installSessionSecurityHooks();
     }
   });
 });

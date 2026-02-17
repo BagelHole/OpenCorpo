@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { DbHandle } from "./db";
 import { detectKind, validateControlPlaneDocument } from "./control-plane";
@@ -125,13 +125,58 @@ export function applyControlPlaneChange(
     return { ok: false as const, error: "change_not_proposed" };
   }
 
+  const kind = detectKind(row.file_path);
+  if (!kind) {
+    return { ok: false as const, error: "unsupported_file_path" };
+  }
+
+  let parsedAfter: unknown;
+  try {
+    parsedAfter = JSON.parse(row.after_json);
+  } catch {
+    return { ok: false as const, error: "invalid_after_json" };
+  }
+  const validation = validateControlPlaneDocument(kind, parsedAfter);
+  if (!validation.valid) {
+    return {
+      ok: false as const,
+      error: `validation_failed:${validation.errors.join("; ")}`
+    };
+  }
+
   const absolutePath = resolve(controlPlaneRoot, row.file_path);
+  const beforeRaw = existsSync(absolutePath)
+    ? readFileSync(absolutePath, "utf-8")
+    : null;
+  const nextRaw = `${JSON.stringify(parsedAfter, null, 2)}\n`;
+
   mkdirSync(dirname(absolutePath), { recursive: true });
-  writeFileSync(
-    absolutePath,
-    `${JSON.stringify(JSON.parse(row.after_json), null, 2)}\n`,
-    "utf-8"
-  );
+  try {
+    writeFileSync(absolutePath, nextRaw, "utf-8");
+    if (existsSync(absolutePath)) {
+      const written = JSON.parse(readFileSync(absolutePath, "utf-8"));
+      const writtenValidation = validateControlPlaneDocument(kind, written);
+      if (!writtenValidation.valid) {
+        throw new Error(`post_write_validation_failed:${writtenValidation.errors.join("; ")}`);
+      }
+    }
+  } catch (error) {
+    try {
+      if (beforeRaw === null) {
+        if (existsSync(absolutePath)) {
+          unlinkSync(absolutePath);
+        }
+      } else {
+        writeFileSync(absolutePath, beforeRaw, "utf-8");
+      }
+    } catch {
+      // Best effort rollback; keep original apply error as canonical response.
+    }
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "apply_failed"
+    };
+  }
 
   db.prepare(
     `UPDATE control_plane_changes

@@ -118,7 +118,7 @@ AI is allowed to edit:
 - tools, policies, workflows, jobs, schemas, UI layouts
 
 Desktop navigation and base pages are now declarative in `config/ui/desktop.json` and validated by `config/schemas/ui.schema.json`.
-The AI can add sidebar items and simple JSON-based pages there without code changes.
+The AI can add sidebar items, interactive action buttons, and sandboxed npm React widgets there without code changes.
 
 In desktop runtime, mutable user-specific Control Plane state is stored under the runtime data directory (`data/config` in local dev, app runtime folder in packaged builds). Do not commit those runtime JSON changes.
 

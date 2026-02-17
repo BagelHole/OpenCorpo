@@ -31,6 +31,8 @@ export default defineConfig({
       "/code": "http://127.0.0.1:3555",
       "/secrets": "http://127.0.0.1:3555",
       "/oauth": "http://127.0.0.1:3555",
+      "/widgets": "http://127.0.0.1:3555",
+      "/terminal": "http://127.0.0.1:3555",
       "/stream": "http://127.0.0.1:3555"
     }
   },

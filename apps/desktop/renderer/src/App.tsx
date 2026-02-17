@@ -204,8 +204,13 @@ export function App() {
       </header>
 
       <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 gap-4 overflow-hidden px-4 py-4 sm:px-6 lg:gap-6">
-        <aside className={cn("hidden flex-shrink-0 lg:block", sidebarCollapsed ? "w-16" : "w-52")}>
-          <nav className="sticky top-24 space-y-1 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2">
+        <aside
+          className={cn(
+            "hidden min-h-0 flex-shrink-0 lg:block",
+            sidebarCollapsed ? "w-16" : "w-52"
+          )}
+        >
+          <nav className="oc-scrollbar-subtle sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto space-y-1 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] p-2">
             {state.uiConfig.sidebar.collapsible && (
               <button
                 onClick={toggleSidebarCollapsed}

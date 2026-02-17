@@ -333,6 +333,7 @@ type ScriptRunResult =
       ok: true;
       command: string;
       args: string[];
+      dependenciesInstalled?: string[];
       stdout: string;
       stderr: string;
       exitCode: number;
@@ -343,6 +344,7 @@ type ScriptRunResult =
       error: string;
       command?: string;
       args?: string[];
+      dependenciesInstalled?: string[];
       stdout?: string;
       stderr?: string;
       exitCode?: number | null;
@@ -394,6 +396,18 @@ async function runScriptJob(
   });
   const executionMode = getScriptExecutionMode(runContext.db);
   const daemonPort = Number(process.env.OPENCORPO_PORT || 3555);
+  const dependencyInstallTimeoutMs =
+    typeof script.dependency_install_timeout_ms === "number" &&
+    Number.isFinite(script.dependency_install_timeout_ms)
+      ? Math.max(1000, Math.min(300000, Number(script.dependency_install_timeout_ms)))
+      : 120000;
+  const dependenciesResult = parseScriptDependencies(script.dependencies);
+  if (!dependenciesResult.ok) {
+    return {
+      ok: false,
+      error: dependenciesResult.error
+    };
+  }
 
   if (executionMode === "safe") {
     const source = readFileSync(absolutePath, "utf-8");
@@ -402,6 +416,21 @@ async function runScriptJob(
       return {
         ok: false,
         error: `script_blocked_in_safe_mode:${violation}`
+      };
+    }
+  }
+
+  if (dependenciesResult.dependencies.length > 0) {
+    const installResult = await installScriptDependencies(
+      dependenciesResult.dependencies,
+      dependencyInstallTimeoutMs
+    );
+    if (!installResult.ok) {
+      return {
+        ok: false,
+        error: installResult.error,
+        stdout: installResult.stdout,
+        stderr: installResult.stderr
       };
     }
   }
@@ -484,6 +513,7 @@ async function runScriptJob(
         ok: true,
         command,
         args: commandArgs,
+        dependenciesInstalled: dependenciesResult.dependencies,
         stdout,
         stderr,
         exitCode: code ?? 0,
@@ -538,4 +568,141 @@ function buildScriptEnv(
     OPENCORPO_SCRIPT_DB_TOKEN: context.scriptDbToken,
     OPENCORPO_SCRIPT_DB_WRITABLE_TABLES: context.writableTables.join(",")
   };
+}
+
+function parseScriptDependencies(raw: unknown):
+  | { ok: true; dependencies: string[] }
+  | { ok: false; error: string } {
+  if (raw == null) return { ok: true, dependencies: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "invalid_script_dependencies_not_array" };
+  }
+  if (raw.length > 20) {
+    return { ok: false, error: "invalid_script_dependencies_too_many" };
+  }
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      return { ok: false, error: "invalid_script_dependency_type" };
+    }
+    const spec = item.trim();
+    if (!isSafeScriptDependencySpec(spec)) {
+      return { ok: false, error: `invalid_script_dependency_spec:${spec || "empty"}` };
+    }
+    if (seen.has(spec)) continue;
+    seen.add(spec);
+    deduped.push(spec);
+  }
+  return { ok: true, dependencies: deduped };
+}
+
+function isSafeScriptDependencySpec(value: string) {
+  if (!value) return false;
+  if (value.length > 128) return false;
+  if (/\s/.test(value)) return false;
+  const lower = value.toLowerCase();
+  const blockedPrefixes = [
+    ".",
+    "/",
+    "\\",
+    "file:",
+    "link:",
+    "workspace:",
+    "git+",
+    "http:",
+    "https:",
+    "github:"
+  ];
+  if (blockedPrefixes.some((prefix) => lower.startsWith(prefix))) return false;
+  if (value.includes(":") || value.includes("#")) return false;
+
+  let name = value;
+  let version = "";
+  if (value.startsWith("@")) {
+    const separator = value.indexOf("@", 1);
+    if (separator > 0) {
+      name = value.slice(0, separator);
+      version = value.slice(separator + 1);
+    }
+  } else {
+    const separator = value.indexOf("@");
+    if (separator > 0) {
+      name = value.slice(0, separator);
+      version = value.slice(separator + 1);
+    }
+  }
+  if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(name)) return false;
+  if (!version) return true;
+  return /^[a-z0-9*^~<>=|.-]+$/i.test(version);
+}
+
+async function installScriptDependencies(
+  dependencies: string[],
+  timeoutMs: number
+): Promise<
+  | { ok: true }
+  | { ok: false; error: string; stdout: string; stderr: string }
+> {
+  if (dependencies.length === 0) return { ok: true };
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npmArgs = [
+    "install",
+    "--no-save",
+    "--ignore-scripts",
+    "--no-audit",
+    "--fund=false",
+    "--package-lock=false",
+    ...dependencies
+  ];
+  return await new Promise((resolveInstall) => {
+    const child = spawn(npmCommand, npmArgs, {
+      cwd: jobsScriptsRoot,
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolveInstall({
+        ok: false,
+        error: `script_dependency_install_error:${error.message}`,
+        stdout,
+        stderr
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolveInstall({
+          ok: false,
+          error: `script_dependency_install_timeout_${timeoutMs}ms`,
+          stdout,
+          stderr
+        });
+        return;
+      }
+      if (code !== 0) {
+        resolveInstall({
+          ok: false,
+          error: `script_dependency_install_exit_${code ?? "unknown"}`,
+          stdout,
+          stderr
+        });
+        return;
+      }
+      resolveInstall({ ok: true });
+    });
+  });
 }

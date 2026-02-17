@@ -3,6 +3,7 @@ import { z } from "zod";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { AgentContext, AgentToolEvent } from "./agent";
+import { schemaRoot } from "./paths";
 import {
   buildApprovalsList,
   buildAuditList,
@@ -63,6 +64,357 @@ function normalizeControlPlanePath(path: string) {
   if (!normalized.endsWith(".json")) return null;
   if (normalized.includes("..")) return null;
   return normalized;
+}
+
+function isSafeWidgetPackageSpec(value: string) {
+  const spec = value.trim();
+  if (!spec || spec.length > 160) return false;
+  if (/\s/.test(spec)) return false;
+  if (
+    spec.includes(":") ||
+    spec.includes("#") ||
+    spec.startsWith(".") ||
+    spec.startsWith("/") ||
+    spec.startsWith("\\")
+  ) {
+    return false;
+  }
+  return /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(?:@[A-Za-z0-9*^~<>=|.-]+)?$/.test(spec);
+}
+
+function parseWidgetPackageSpec(spec: string) {
+  const trimmed = spec.trim();
+  if (!trimmed) return { name: "", version: "" };
+  if (trimmed.startsWith("@")) {
+    const secondAt = trimmed.indexOf("@", 1);
+    return secondAt > 0
+      ? { name: trimmed.slice(0, secondAt), version: trimmed.slice(secondAt + 1) }
+      : { name: trimmed, version: "" };
+  }
+  const at = trimmed.indexOf("@");
+  return at > 0
+    ? { name: trimmed.slice(0, at), version: trimmed.slice(at + 1) }
+    : { name: trimmed, version: "" };
+}
+
+async function npmPackageExists(spec: string) {
+  if (!isSafeWidgetPackageSpec(spec)) {
+    return { ok: false as const, error: `invalid package spec: ${spec}` };
+  }
+  const { name, version } = parseWidgetPackageSpec(spec);
+  if (!name) return { ok: false as const, error: `invalid package name in spec: ${spec}` };
+  const encodedName = encodeURIComponent(name);
+  const encodedVersion = version ? `/${encodeURIComponent(version)}` : "";
+  const url = `https://registry.npmjs.org/${encodedName}${encodedVersion}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (response.ok) return { ok: true as const };
+    if (response.status === 404) {
+      return { ok: false as const, error: `npm package not found: ${spec}` };
+    }
+    return { ok: false as const, error: `npm registry lookup failed for ${spec} (${response.status})` };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? `npm registry lookup failed for ${spec}: ${error.message}`
+          : `npm registry lookup failed for ${spec}`
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+type NpmPackageMetadataResult =
+  | { ok: true; metadata: Record<string, unknown> }
+  | { ok: false; error: string };
+
+async function fetchNpmPackageMetadata(spec: string): Promise<NpmPackageMetadataResult> {
+  if (!isSafeWidgetPackageSpec(spec)) {
+    return { ok: false, error: `invalid package spec: ${spec}` };
+  }
+  const { name, version } = parseWidgetPackageSpec(spec);
+  if (!name) return { ok: false, error: `invalid package name in spec: ${spec}` };
+  const encodedName = encodeURIComponent(name);
+  const encodedVersion = version ? `/${encodeURIComponent(version)}` : "";
+  const url = `https://registry.npmjs.org/${encodedName}${encodedVersion}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      if (response.status === 404) return { ok: false, error: `npm package not found: ${spec}` };
+      return { ok: false, error: `npm registry lookup failed for ${spec} (${response.status})` };
+    }
+    const metadata = (await response.json()) as Record<string, unknown>;
+    return { ok: true, metadata };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? `npm registry lookup failed for ${spec}: ${error.message}`
+          : `npm registry lookup failed for ${spec}`
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function tokenizeShellCommand(command: string) {
+  return command
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function parseNpxPackageFromCommand(command: string) {
+  const tokens = tokenizeShellCommand(command);
+  if (tokens.length < 2) return null;
+  const head = tokens[0]?.toLowerCase();
+  if (head !== "npx" && head !== "npm") return null;
+  if (head === "npm") {
+    if (tokens[1]?.toLowerCase() !== "exec") return null;
+    let index = 2;
+    while (index < tokens.length) {
+      const token = tokens[index];
+      if (!token) break;
+      if (token === "--") {
+        index += 1;
+        break;
+      }
+      if (token.startsWith("-")) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
+    const spec = tokens[index];
+    return spec && isSafeWidgetPackageSpec(spec) ? spec : null;
+  }
+  let index = 1;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (!token) break;
+    if (token === "--") {
+      index += 1;
+      break;
+    }
+    if (token.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  const spec = tokens[index];
+  return spec && isSafeWidgetPackageSpec(spec) ? spec : null;
+}
+
+async function validateWidgetPackageBrowserCompatibility(spec: string) {
+  if (!isSafeWidgetPackageSpec(spec)) {
+    return { ok: false as const, error: `invalid package spec: ${spec}` };
+  }
+  const url = `https://esm.sh/${spec}?target=es2022&external=react,react-dom`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: `could not inspect widget package runtime for ${spec} (${response.status})`
+      };
+    }
+    const source = await response.text();
+    const terminalSignals = [
+      "/node/process.mjs",
+      "__Process$.stdin",
+      "process.stdin",
+      "stdin.setRawMode",
+      "TerminalRenderer",
+      "console.clear()",
+      "SIGINT"
+    ];
+    const matched = terminalSignals.filter((signal) => source.includes(signal));
+    if (matched.length > 0) {
+      return {
+        ok: false as const,
+        error: `package is not browser-widget compatible (node/terminal runtime detected): ${spec}`
+      };
+    }
+    return { ok: true as const };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? `failed to inspect widget package runtime for ${spec}: ${error.message}`
+          : `failed to inspect widget package runtime for ${spec}`
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function collectUiReactWidgetPackageSpecs(doc: Record<string, unknown>) {
+  const pages = Array.isArray(doc.pages) ? doc.pages : [];
+  const packageSpecs = new Set<string>();
+  for (const page of pages) {
+    if (!page || typeof page !== "object") continue;
+    const blocks = Array.isArray((page as Record<string, unknown>).blocks)
+      ? ((page as Record<string, unknown>).blocks as Array<Record<string, unknown>>)
+      : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== "object") continue;
+      if (block.type !== "react_widget") continue;
+      const pkg = typeof block.package === "string" ? block.package.trim() : "";
+      if (pkg) packageSpecs.add(pkg);
+    }
+  }
+  return packageSpecs;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function mergeUiWithExisting(
+  afterJson: Record<string, unknown>,
+  beforeJson: Record<string, unknown> | null
+) {
+  if (!beforeJson) return afterJson;
+
+  const merged: Record<string, unknown> = { ...beforeJson, ...afterJson };
+
+  const beforeSidebar = asRecord(beforeJson.sidebar);
+  const afterSidebar = asRecord(afterJson.sidebar);
+  if (beforeSidebar || afterSidebar) {
+    const mergedSidebar: Record<string, unknown> = { ...(beforeSidebar ?? {}), ...(afterSidebar ?? {}) };
+    const beforeItems = Array.isArray(beforeSidebar?.items)
+      ? (beforeSidebar!.items as unknown[])
+      : [];
+    const afterItems = Array.isArray(afterSidebar?.items) ? (afterSidebar!.items as unknown[]) : [];
+    const seenIds = new Set<string>();
+    const seenPaths = new Set<string>();
+    const mergedItems: unknown[] = [];
+
+    const addItem = (value: unknown) => {
+      const row = asRecord(value);
+      if (!row) return;
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      const path = typeof row.path === "string" ? row.path.trim() : "";
+      if (!id || !path) return;
+      if (seenIds.has(id) || seenPaths.has(path)) return;
+      seenIds.add(id);
+      seenPaths.add(path);
+      mergedItems.push(row);
+    };
+
+    for (const item of afterItems) addItem(item);
+    for (const item of beforeItems) addItem(item);
+    mergedSidebar.items = mergedItems;
+    merged.sidebar = mergedSidebar;
+  }
+
+  const beforePages = Array.isArray(beforeJson.pages) ? (beforeJson.pages as unknown[]) : [];
+  const afterPages = Array.isArray(afterJson.pages) ? (afterJson.pages as unknown[]) : [];
+  const mergedPages: unknown[] = [];
+  const seenPageIds = new Set<string>();
+
+  const addPage = (value: unknown) => {
+    const row = asRecord(value);
+    if (!row) return;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    if (!id || seenPageIds.has(id)) return;
+    seenPageIds.add(id);
+    mergedPages.push(row);
+  };
+
+  for (const page of afterPages) addPage(page);
+  for (const page of beforePages) addPage(page);
+  merged.pages = mergedPages;
+
+  return merged;
+}
+
+async function validateUiReactWidgetPackages(
+  afterJson: Record<string, unknown>,
+  beforeJson?: Record<string, unknown> | null
+) {
+  const packageSpecs = collectUiReactWidgetPackageSpecs(afterJson);
+  const beforeSpecs = beforeJson ? collectUiReactWidgetPackageSpecs(beforeJson) : new Set<string>();
+  const specsToValidate = Array.from(packageSpecs).filter((spec) => !beforeSpecs.has(spec));
+
+  if (specsToValidate.length === 0) return [] as string[];
+  if (packageSpecs.size === 0) return [] as string[];
+  const errors: string[] = [];
+  for (const spec of specsToValidate) {
+    const found = await npmPackageExists(spec);
+    if (!found.ok) {
+      errors.push(found.error);
+      continue;
+    }
+    const compatibility = await validateWidgetPackageBrowserCompatibility(spec);
+    if (!compatibility.ok) errors.push(compatibility.error);
+  }
+  return errors;
+}
+
+function collectUiTerminalWidgetNpxSpecs(doc: Record<string, unknown>) {
+  const pages = Array.isArray(doc.pages) ? doc.pages : [];
+  const out = new Set<string>();
+  for (const page of pages) {
+    if (!page || typeof page !== "object") continue;
+    const blocks = Array.isArray((page as Record<string, unknown>).blocks)
+      ? ((page as Record<string, unknown>).blocks as Array<Record<string, unknown>>)
+      : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== "object") continue;
+      if (block.type !== "terminal_widget") continue;
+      const command = typeof block.command === "string" ? block.command.trim() : "";
+      if (!command) continue;
+      const npxSpec = parseNpxPackageFromCommand(command);
+      if (npxSpec) out.add(npxSpec);
+    }
+  }
+  return out;
+}
+
+async function validateUiTerminalWidgetCommands(
+  afterJson: Record<string, unknown>,
+  beforeJson?: Record<string, unknown> | null
+) {
+  const specs = collectUiTerminalWidgetNpxSpecs(afterJson);
+  if (specs.size === 0) return [] as string[];
+  const beforeSpecs = beforeJson ? collectUiTerminalWidgetNpxSpecs(beforeJson) : new Set<string>();
+  const specsToValidate = Array.from(specs).filter((spec) => !beforeSpecs.has(spec));
+  if (specsToValidate.length === 0) return [] as string[];
+
+  const errors: string[] = [];
+  for (const spec of specsToValidate) {
+    const metadata = await fetchNpmPackageMetadata(spec);
+    if (!metadata.ok) {
+      errors.push(metadata.error);
+      continue;
+    }
+    const bin = metadata.metadata.bin;
+    const hasBin =
+      typeof bin === "string" ||
+      (bin && typeof bin === "object" && Object.keys(bin as Record<string, unknown>).length > 0);
+    if (!hasBin) {
+      errors.push(
+        `terminal_widget command uses npx package without executable bin: ${spec}. Choose a CLI package (with bin) or use react_widget for browser components.`
+      );
+    }
+  }
+  return errors;
 }
 
 function toPreview(value: unknown): string | undefined {
@@ -130,6 +482,22 @@ function withToolTelemetry<TInput, TResult>(
       throw error;
     }
   };
+}
+
+function formatUiValidationHelp(details: string[] | undefined) {
+  const base = (details ?? []).join("; ");
+  const hasOneOf = (details ?? []).some((line) => line.includes("oneOf"));
+  if (!hasOneOf) return base;
+  const help = [
+    "UI block validation hint:",
+    "Supported block types: markdown, stats, list, note, key_value, job_results, job_table, actions, react_widget, terminal_widget, web_embed.",
+    'Valid actions block shape: {"type":"actions","buttons":[{"label":"Run","action":{"type":"run_job","jobName":"my-job"}}]}',
+    'Valid open_url button shape: {"label":"Docs","action":{"type":"open_url","url":"https://example.com"}}',
+    'Valid react_widget shape: {"type":"react_widget","package":"pkg@1.2.3","exportName":"Widget","props":{},"height":420}',
+    'Valid terminal_widget shape: {"type":"terminal_widget","command":"npx -y pkg","cwd":"userland","height":320,"allowInput":true}',
+    'Valid web_embed shape: {"type":"web_embed","url":"https://example.com/embed","height":700}'
+  ].join(" ");
+  return base ? `${base} ${help}` : help;
 }
 
 export function buildAgentTools(context: AgentContext) {
@@ -410,7 +778,7 @@ export function buildAgentTools(context: AgentContext) {
       inputSchema: z.object({}),
       execute: withToolTelemetry(context, "get_ui_schema", async () => {
         try {
-          const schemaPath = resolve(context.controlPlaneRoot, "schemas/ui.schema.json");
+          const schemaPath = resolve(schemaRoot, "ui.schema.json");
           return readFileSync(schemaPath, "utf-8");
         } catch {
           return "UI schema not found.";
@@ -475,13 +843,40 @@ export function buildAgentTools(context: AgentContext) {
         }
         if (normalized.includes("..")) return "Path traversal not allowed.";
         try {
+          let nextJson: Record<string, unknown> = after_json;
+          if (normalized.startsWith("ui/")) {
+            const absolutePath = resolve(context.controlPlaneRoot, normalized);
+            let beforeJson: Record<string, unknown> | null = null;
+            if (existsSync(absolutePath)) {
+              try {
+                const raw = JSON.parse(readFileSync(absolutePath, "utf-8"));
+                if (raw && typeof raw === "object") beforeJson = raw as Record<string, unknown>;
+              } catch {
+                beforeJson = null;
+              }
+            }
+            nextJson = mergeUiWithExisting(after_json, beforeJson);
+            const packageErrors = await validateUiReactWidgetPackages(nextJson, beforeJson);
+            if (packageErrors.length > 0) {
+              return `Config change rejected: ${packageErrors.join("; ")}`;
+            }
+            const terminalErrors = await validateUiTerminalWidgetCommands(nextJson, beforeJson);
+            if (terminalErrors.length > 0) {
+              return `Config change rejected: ${terminalErrors.join("; ")}`;
+            }
+          }
           const proposed = proposeControlPlaneChange(context.db, context.controlPlaneRoot, {
             actor: "agent",
             relativePath: normalized,
-            afterJson: after_json
+            afterJson: nextJson
           });
           if (!proposed.ok) {
-            return `Config change rejected: ${(proposed as { details?: string[] }).details?.join("; ") ?? proposed.error}`;
+            const details = (proposed as { details?: string[] }).details;
+            const rendered =
+              normalized.startsWith("ui/")
+                ? formatUiValidationHelp(details)
+                : details?.join("; ");
+            return `Config change rejected: ${rendered ?? proposed.error}`;
           }
           const isHighRisk = proposed.risk === "high";
           if (isHighRisk) {
