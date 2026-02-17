@@ -19,3 +19,9 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Runtime/user-generated workspace artifacts
+userland/jobs/*
+!userland/jobs/.gitkeep
+userland/workspace/*
+!userland/workspace/.gitkeep

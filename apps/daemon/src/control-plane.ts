@@ -79,8 +79,48 @@ export function detectKind(relativePath: string): Kind | null {
 export function validateControlPlaneDocument(kind: Kind, content: unknown) {
   const validate = validators[kind];
   const valid = validate(content) as boolean;
-  const errors = valid
+  const schemaErrors = valid
     ? []
     : (validate.errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message}`.trim());
-  return { valid, errors };
+  const customErrors = kind === "jobs" ? validateJobDocument(content) : [];
+  const errors = [...schemaErrors, ...customErrors];
+  return { valid: errors.length === 0, errors };
+}
+
+function validateJobDocument(content: unknown): string[] {
+  if (!content || typeof content !== "object") return [];
+  const job = content as Record<string, unknown>;
+  const errors: string[] = [];
+
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  for (const [index, step] of steps.entries()) {
+    if (!step || typeof step !== "object") continue;
+    const toolRaw = (step as Record<string, unknown>).tool;
+    const tool = typeof toolRaw === "string" ? normalizeToolName(toolRaw) : "";
+    if (tool === "script.run") {
+      errors.push(`/steps/${index}/tool script.run is not supported. Use top-level script.path jobs.`);
+    }
+  }
+
+  const type = typeof job.type === "string" ? job.type.trim().toLowerCase() : "";
+  const script = job.script && typeof job.script === "object" ? (job.script as Record<string, unknown>) : null;
+  if (type === "script") {
+    if (!script) {
+      errors.push(`/script is required when type is "script".`);
+    } else {
+      const path = typeof script.path === "string" ? script.path.trim() : "";
+      if (!path) {
+        errors.push(`/script/path is required for script jobs.`);
+      }
+      if ("source" in script) {
+        errors.push(`/script/source is not supported. Use /script/path pointing to userland/jobs/*.ts.`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+function normalizeToolName(name: string) {
+  return name.trim().toLowerCase().replace(/[_.-]+/g, ".");
 }

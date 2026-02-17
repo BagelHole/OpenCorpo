@@ -41,6 +41,8 @@ type ScriptSecretItem = {
   description: string;
 };
 
+type ScriptExecutionMode = "safe" | "trusted";
+
 type OnboardingData = {
   completed: boolean;
   aiProvider: "anthropic" | "openai" | "local";
@@ -89,10 +91,12 @@ export function SettingsView({
   profile,
   aiModelDefaults,
   scriptSecrets,
+  scriptExecutionMode,
   persistOnboarding,
   onSaveProfile,
   onSaveAiModelDefaults,
   onSaveScriptSecret,
+  onSaveScriptExecutionMode,
   saveAiProvider,
   onRestartDaemon,
   onRunDiagnostics,
@@ -122,6 +126,7 @@ export function SettingsView({
     local: string;
   };
   scriptSecrets: ScriptSecretItem[];
+  scriptExecutionMode: ScriptExecutionMode;
   persistOnboarding: (next: OnboardingData) => void;
   onSaveProfile: (profile: {
     name: string;
@@ -139,6 +144,7 @@ export function SettingsView({
     value: string;
     description?: string;
   }) => Promise<void>;
+  onSaveScriptExecutionMode: (mode: ScriptExecutionMode) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
@@ -151,12 +157,15 @@ export function SettingsView({
   advancedMode: boolean;
   apiBase: string;
 }) {
+  const editableFieldClass =
+    "w-full rounded-lg border border-[var(--oc-border-strong)] bg-[var(--oc-bg-elevated)] px-3 py-2 text-sm text-[var(--oc-ink)] shadow-[inset_0_1px_0_rgba(0,0,0,0.04)] outline-none transition placeholder:text-[var(--oc-ink-muted)] focus:border-[var(--oc-accent)] focus:shadow-[0_0_0_2px_var(--oc-bg-elevated),0_0_0_3px_var(--oc-border-strong)]";
   const [tokenInput, setTokenInput] = useState("");
   const [aiKeyInput, setAiKeyInput] = useState("");
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [scriptSecretMessage, setScriptSecretMessage] = useState<string | null>(null);
+  const [scriptModeMessage, setScriptModeMessage] = useState<string | null>(null);
   const [scriptSecretNameInput, setScriptSecretNameInput] = useState("");
   const [scriptSecretDescriptionInput, setScriptSecretDescriptionInput] = useState("");
   const [scriptSecretValueInput, setScriptSecretValueInput] = useState("");
@@ -272,6 +281,28 @@ export function SettingsView({
     }
   };
 
+  const saveScriptMode = async (nextMode: ScriptExecutionMode) => {
+    if (nextMode === scriptExecutionMode) return;
+    if (nextMode === "trusted") {
+      const confirmed = window.confirm(
+        "Enable Trusted Script Mode? This reduces protections and allows broader script access."
+      );
+      if (!confirmed) return;
+    }
+    try {
+      await onSaveScriptExecutionMode(nextMode);
+      setScriptModeMessage(
+        nextMode === "safe"
+          ? "Script mode set to Safe."
+          : "Trusted mode enabled. Use only with trusted scripts."
+      );
+    } catch (error) {
+      setScriptModeMessage(
+        error instanceof Error ? error.message : "Failed to update script mode."
+      );
+    }
+  };
+
   return (
     <div className="grid gap-4 sm:gap-5 xl:grid-cols-2">
       <Card>
@@ -343,7 +374,7 @@ export function SettingsView({
               type="password"
               value={aiKeyInput}
               onChange={(e) => setAiKeyInput(e.target.value)}
-              className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+              className={editableFieldClass}
               placeholder="Paste API key"
             />
             <Button size="sm" onClick={() => void saveAiKey()}>
@@ -371,7 +402,7 @@ export function SettingsView({
             onChange={(event) =>
               setModelDefaultsInput((current) => ({ ...current, anthropic: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Anthropic default model (e.g. anthropic/claude-sonnet-4.5)"
           />
           <input
@@ -379,7 +410,7 @@ export function SettingsView({
             onChange={(event) =>
               setModelDefaultsInput((current) => ({ ...current, openai: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="OpenAI default model (e.g. gpt-5.2-chat-latest)"
           />
           <input
@@ -387,12 +418,59 @@ export function SettingsView({
             onChange={(event) =>
               setModelDefaultsInput((current) => ({ ...current, local: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Local/BYOK default model"
           />
           <Button size="sm" onClick={() => void saveModelDefaults()}>
             Save model defaults
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Script Security Mode</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-xs text-[var(--oc-ink-muted)]">
+            Safe mode is recommended. Trusted mode allows more script power but lowers security.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void saveScriptMode("safe")}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                scriptExecutionMode === "safe"
+                  ? "border-[var(--oc-accent)] bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                  : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)] hover:border-[var(--oc-border-strong)]"
+              }`}
+            >
+              Safe (Recommended)
+            </button>
+            <button
+              onClick={() => void saveScriptMode("trusted")}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                scriptExecutionMode === "trusted"
+                  ? "border-[var(--oc-warning)] bg-[var(--oc-warning-bg)] text-[var(--oc-warning)]"
+                  : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)] hover:border-[var(--oc-border-strong)]"
+              }`}
+            >
+              Trusted (Less secure)
+            </button>
+          </div>
+          {scriptExecutionMode === "safe" ? (
+            <div className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+              Scripts run with restricted environment and safe-mode import checks.
+            </div>
+          ) : (
+            <div className="rounded-lg border border-[var(--oc-warning)]/50 bg-[var(--oc-warning-bg)] px-3 py-2 text-xs text-[var(--oc-warning)]">
+              Trusted mode is enabled. Scripts have broader access and can do more damage if compromised.
+            </div>
+          )}
+          {scriptModeMessage && (
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+              {scriptModeMessage}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -408,20 +486,20 @@ export function SettingsView({
           <input
             value={scriptSecretNameInput}
             onChange={(event) => setScriptSecretNameInput(event.target.value)}
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Secret name (example: stripe.api_key)"
           />
           <input
             value={scriptSecretDescriptionInput}
             onChange={(event) => setScriptSecretDescriptionInput(event.target.value)}
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Description (optional)"
           />
           <input
             type="password"
             value={scriptSecretValueInput}
             onChange={(event) => setScriptSecretValueInput(event.target.value)}
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Secret value"
           />
           <Button size="sm" onClick={() => void saveScriptSecret()}>
@@ -472,7 +550,7 @@ export function SettingsView({
             <input
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
-              className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+              className={editableFieldClass}
               placeholder="Paste Gmail access token"
             />
             <div className="flex flex-wrap gap-2">
@@ -502,7 +580,7 @@ export function SettingsView({
             onChange={(event) =>
               setProfileInput((current) => ({ ...current, name: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Name"
           />
           <input
@@ -510,7 +588,7 @@ export function SettingsView({
             onChange={(event) =>
               setProfileInput((current) => ({ ...current, role: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Role"
           />
           <input
@@ -518,7 +596,7 @@ export function SettingsView({
             onChange={(event) =>
               setProfileInput((current) => ({ ...current, jobTitle: event.target.value }))
             }
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Job title"
           />
           <textarea
@@ -527,7 +605,7 @@ export function SettingsView({
               setProfileInput((current) => ({ ...current, about: event.target.value }))
             }
             rows={3}
-            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)]"
+            className={editableFieldClass}
             placeholder="Anything else the AI should know..."
           />
           <Button size="sm" onClick={() => void saveProfile()}>

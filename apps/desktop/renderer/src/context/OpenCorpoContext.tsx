@@ -12,6 +12,7 @@ import type {
   AiProviderCatalog,
   Approval,
   AuditEntry,
+  ScriptExecutionMode,
   ScriptSecretItem,
   Job,
   JobRun,
@@ -413,6 +414,7 @@ type OpenCorpoContextValue = {
   profile: UserProfile;
   aiModelDefaults: AiModelDefaults;
   scriptSecrets: ScriptSecretItem[];
+  scriptExecutionMode: ScriptExecutionMode;
   gmailStatus: GmailStatus;
   aiProviderCatalog: AiProviderCatalog;
   uiConfig: UiConfig;
@@ -435,6 +437,7 @@ type OpenCorpoContextValue = {
     value: string;
     description?: string;
   }) => Promise<void>;
+  saveScriptExecutionMode: (mode: ScriptExecutionMode) => Promise<void>;
   refreshChatSessions: () => Promise<void>;
   createChatSession: (input?: {
     title?: string;
@@ -499,6 +502,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     local: "",
   });
   const [scriptSecrets, setScriptSecrets] = useState<ScriptSecretItem[]>([]);
+  const [scriptExecutionMode, setScriptExecutionMode] = useState<ScriptExecutionMode>("safe");
   const [gmailStatus, setGmailStatus] = useState<GmailStatus>({
     connected: false,
     tokenSource: null,
@@ -600,11 +604,12 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProfileAndModels = useCallback(async (client: OpenCorpoApi) => {
-    const [profileRes, modelRes, providerRes, scriptSecretsRes] = await Promise.all([
+    const [profileRes, modelRes, providerRes, scriptSecretsRes, scriptModeRes] = await Promise.all([
       client.getProfile(),
       client.getAiModelDefaults(),
       client.getAiProviderCatalog(),
       client.getScriptSecrets(),
+      client.getScriptExecutionMode(),
     ]);
     if (profileRes.ok) {
       setProfile(profileRes.data.profile);
@@ -625,6 +630,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     }
     if (scriptSecretsRes.ok) {
       setScriptSecrets(scriptSecretsRes.data.items ?? []);
+    }
+    if (scriptModeRes.ok) {
+      setScriptExecutionMode(scriptModeRes.data.mode ?? "safe");
     }
   }, []);
 
@@ -1094,6 +1102,16 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     [api]
   );
 
+  const saveScriptExecutionMode = useCallback(
+    async (mode: ScriptExecutionMode) => {
+      if (!api) throw new Error("API client is not ready yet. Please try again.");
+      const res = await api.saveScriptExecutionMode(mode);
+      if (!res.ok) throw new Error(res.error);
+      setScriptExecutionMode(res.data.mode ?? mode);
+    },
+    [api]
+  );
+
   const checkAiKeyConfigured = useCallback(async () => {
     if (!api) return false;
     const res = await api.getAiKeyStatus();
@@ -1207,6 +1225,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       scriptSecrets,
+      scriptExecutionMode,
       gmailStatus,
       aiProviderCatalog,
       uiConfig,
@@ -1224,6 +1243,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveProfile,
       saveAiModelDefaults,
       saveScriptSecret,
+      saveScriptExecutionMode,
       refreshChatSessions,
       createChatSession,
       updateChatSession,
@@ -1259,6 +1279,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       profile,
       aiModelDefaults,
       scriptSecrets,
+      scriptExecutionMode,
       gmailStatus,
       aiProviderCatalog,
       uiConfig,
@@ -1276,6 +1297,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveProfile,
       saveAiModelDefaults,
       saveScriptSecret,
+      saveScriptExecutionMode,
       refreshChatSessions,
       createChatSession,
       updateChatSession,

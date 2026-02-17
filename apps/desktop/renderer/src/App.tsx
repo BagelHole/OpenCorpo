@@ -130,10 +130,12 @@ export function App() {
           profile={state.profile}
           aiModelDefaults={state.aiModelDefaults}
           scriptSecrets={state.scriptSecrets}
+          scriptExecutionMode={state.scriptExecutionMode}
           persistOnboarding={state.persistOnboarding}
           onSaveProfile={state.saveProfile}
           onSaveAiModelDefaults={state.saveAiModelDefaults}
           onSaveScriptSecret={state.saveScriptSecret}
+          onSaveScriptExecutionMode={state.saveScriptExecutionMode}
           saveAiProvider={state.saveAiProvider}
           onRestartDaemon={state.restartDaemon}
           onRunDiagnostics={state.runDiagnosticsNow}

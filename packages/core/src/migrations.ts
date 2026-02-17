@@ -169,6 +169,35 @@ const baseMigrations: Migration[] = [
   {
     id: "2026_02_11_002_audit_hash_columns",
     up: []
+  },
+  {
+    id: "2026_02_17_003_ai_memory_tables",
+    up: [
+      `CREATE TABLE IF NOT EXISTS ai_user_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject TEXT NOT NULL,
+        note_key TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tags_json TEXT,
+        source TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(subject, note_key)
+      );`,
+      `CREATE TABLE IF NOT EXISTS ai_memory_store (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_type TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        namespace TEXT NOT NULL,
+        data_key TEXT NOT NULL,
+        value_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_type, owner_id, namespace, data_key)
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_ai_user_notes_subject ON ai_user_notes(subject);`,
+      `CREATE INDEX IF NOT EXISTS idx_ai_memory_owner ON ai_memory_store(owner_type, owner_id);`
+    ]
   }
 ];
 

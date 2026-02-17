@@ -1,5 +1,5 @@
 import type { DbHandle } from "./db";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { writeAudit } from "./audit";
@@ -11,6 +11,8 @@ import { executeTool } from "./tool-runner";
 import { findTool } from "./tools";
 import { validateToolInput, type ToolRegistry } from "./tool-registry";
 import { jobsScriptsRoot } from "./paths";
+import { createScriptDbSession } from "./script-db-sessions";
+import { getScriptExecutionMode, type ScriptExecutionMode } from "./script-security";
 
 export type JobRunRow = {
   id: number;
@@ -151,7 +153,11 @@ export async function processQueuedRuns(
         : null;
 
     if (scriptConfig) {
-      const scriptResult = await runScriptJob(scriptConfig);
+      const scriptResult = await runScriptJob(scriptConfig, {
+        db,
+        jobId: run.job_id,
+        jobRunId: run.id
+      });
       if (!scriptResult.ok) {
         updateJobRunStatus(db, run.id, "failed", {
           error: "script_failed",
@@ -362,7 +368,10 @@ function resolveScriptPath(scriptPath: string) {
   return absolutePath;
 }
 
-async function runScriptJob(script: Record<string, unknown>): Promise<ScriptRunResult> {
+async function runScriptJob(
+  script: Record<string, unknown>,
+  runContext: { db: DbHandle; jobId: number; jobRunId: number }
+): Promise<ScriptRunResult> {
   const scriptPath = typeof script.path === "string" ? script.path : "";
   const absolutePath = resolveScriptPath(scriptPath);
   if (!absolutePath) return { ok: false, error: "invalid_script_path" };
@@ -379,17 +388,40 @@ async function runScriptJob(script: Record<string, unknown>): Promise<ScriptRunR
     script.env && typeof script.env === "object"
       ? (script.env as Record<string, unknown>)
       : {};
+  const scriptDbSession = createScriptDbSession({
+    jobId: runContext.jobId,
+    jobRunId: runContext.jobRunId
+  });
+  const executionMode = getScriptExecutionMode(runContext.db);
+  const daemonPort = Number(process.env.OPENCORPO_PORT || 3555);
+
+  if (executionMode === "safe") {
+    const source = readFileSync(absolutePath, "utf-8");
+    const violation = detectSafeModeViolation(source);
+    if (violation) {
+      return {
+        ok: false,
+        error: `script_blocked_in_safe_mode:${violation}`
+      };
+    }
+  }
+
   const env = Object.fromEntries(
     Object.entries(envInput).map(([key, value]) => [key, String(value)])
   );
   const command = resolveBunBinary();
   const commandArgs = ["run", absolutePath, ...args];
+  const childEnv = buildScriptEnv(executionMode, env, {
+    daemonPort,
+    scriptDbToken: scriptDbSession.token,
+    writableTables: scriptDbSession.writableTables
+  });
 
   return await new Promise<ScriptRunResult>((resolveResult) => {
     const started = Date.now();
     const child = spawn(command, commandArgs, {
       cwd: jobsScriptsRoot,
-      env: { ...process.env, ...env },
+      env: childEnv,
       windowsHide: true
     });
     let stdout = "";
@@ -459,4 +491,51 @@ async function runScriptJob(script: Record<string, unknown>): Promise<ScriptRunR
       });
     });
   });
+}
+
+function detectSafeModeViolation(source: string): string | null {
+  const checks: Array<{ name: string; pattern: RegExp }> = [
+    { name: "bun:sqlite", pattern: /\bbun:sqlite\b/i },
+    { name: "node:child_process", pattern: /\bnode:child_process\b/i },
+    { name: "child_process", pattern: /\bchild_process\b/i }
+  ];
+  for (const check of checks) {
+    if (check.pattern.test(source)) return check.name;
+  }
+  return null;
+}
+
+function buildScriptEnv(
+  mode: ScriptExecutionMode,
+  scriptEnv: Record<string, string>,
+  context: { daemonPort: number; scriptDbToken: string; writableTables: string[] }
+) {
+  const base: Record<string, string | undefined> =
+    mode === "trusted"
+      ? { ...process.env }
+      : {
+          PATH: process.env.PATH,
+          Path: process.env.Path,
+          SystemRoot: process.env.SystemRoot,
+          ComSpec: process.env.ComSpec,
+          PATHEXT: process.env.PATHEXT,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          WINDIR: process.env.WINDIR,
+          HOME: process.env.HOME,
+          USERPROFILE: process.env.USERPROFILE,
+          HOMEDRIVE: process.env.HOMEDRIVE,
+          HOMEPATH: process.env.HOMEPATH,
+          NUMBER_OF_PROCESSORS: process.env.NUMBER_OF_PROCESSORS,
+          OS: process.env.OS
+        };
+
+  return {
+    ...base,
+    ...scriptEnv,
+    OPENCORPO_SCRIPT_EXECUTION_MODE: mode,
+    OPENCORPO_SCRIPT_DB_URL: `http://127.0.0.1:${context.daemonPort}/script-db`,
+    OPENCORPO_SCRIPT_DB_TOKEN: context.scriptDbToken,
+    OPENCORPO_SCRIPT_DB_WRITABLE_TABLES: context.writableTables.join(",")
+  };
 }

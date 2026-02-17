@@ -5,6 +5,7 @@ import type { AgentContext, AgentReply, AgentToolEvent } from "./agent";
 import { buildAgentTools } from "./agent-tools";
 import type { DbHandle } from "./db";
 import { getSecretValue, listSecrets } from "./secrets";
+import { getScriptExecutionMode } from "./script-security";
 
 const DEFAULT_GATEWAY_MODEL = "anthropic/claude-sonnet-4.5";
 const DEFAULT_OPENAI_MODEL = "gpt-5.2-chat-latest";
@@ -16,6 +17,7 @@ Response style:
 - Use concise plain language and avoid robotic phrasing.
 
 IMPORTANT: You must use tools to get any operational data. Do NOT guess or make up data. When the user asks about approvals, jobs, audit, status, plugins, or tools, call the appropriate tool first and then summarize the results in natural language.
+User preference/profile notes may be auto-captured into ai_user_notes (subject: "primary_user"). Use list_user_notes when personalization matters.
 
 Available tools:
 - get_status: Overview of current state
@@ -26,6 +28,9 @@ Available tools:
 - list_tools, get_tool_detail: Registered tools
 - list_plugins: Loaded plugins
 - get_help: Example prompts
+- db_list_tables, db_read_query: Direct read-only SQLite access (including old conversation history)
+- upsert_user_note, list_user_notes: Persistent user notes
+- upsert_memory_record, list_memory_records: Persistent AI/job/page data storage
 - http_get, web_search: Public web and HTTP lookup tools
 - list_available_handlers: Tool names with plugin handlers (use before adding tools)
 - get_tool_schema: JSON schema for tool definitions
@@ -42,7 +47,19 @@ For dynamic dashboards from job outputs, use:
 This is generic and should be used for any job/page where live runtime data must appear.
 If creating a job intended to power a page, ensure the job tool output is displayable (non-empty arrays/rows when possible) and avoid overly restrictive search queries that commonly return empty results.
 When proposing jobs, use step objects shaped like { "tool": "...", "with": { ... } } and use canonical dot tool names (example: "web.search", "http.get").
+For script jobs, do NOT use steps with tool "script.run". Use top-level:
+{ "type": "script", "script": { "path": "<file>.ts", "timeout_ms": 120000 } }
+and place the script under userland/jobs.
 Tool-specific guardrails:
+- Use db_read_query for SQL reads only; never attempt writes through SQL.
+- For persistence, write only via upsert_user_note or upsert_memory_record.
+- For runtime script DB access, use only these endpoints:
+  - POST /script-db/query (read-only SQL)
+  - POST /script-db/notes/upsert
+  - POST /script-db/memory/upsert
+  - GET /script-db/notes
+  - GET /script-db/memory
+- Never use /script-db/execute (unsupported).
 - For web.search, do not set with.max_results unless the user explicitly asks for a specific count.
 - If the user asks for a count, keep with.max_results between 1 and 10.
 Use only the minimum number of tool calls needed to complete the request end-to-end.
@@ -64,6 +81,20 @@ Secret handling requirements:
 - For any script requiring credentials, instruct the user to add them in Settings -> Script Secrets.
 - Refer to secrets only by secret name (for example: script.stripe.api_key) and storage location path.
 - Never reveal or invent secret values.
+- Do NOT ask users to configure OPENCORPO_SCRIPT_DB_URL or OPENCORPO_SCRIPT_DB_TOKEN as Script Secrets.
+- For script DB access, use runtime-provided env vars OPENCORPO_SCRIPT_DB_URL and OPENCORPO_SCRIPT_DB_TOKEN directly.
+`;
+const SAFE_SCRIPT_MODE_REQUIREMENTS = `
+Script execution mode: SAFE (default).
+- Scripts run with restricted environment variables.
+- Do not import or use bun:sqlite or child_process APIs.
+- For durable storage, use OPENCORPO_SCRIPT_DB_URL + OPENCORPO_SCRIPT_DB_TOKEN against /script-db/* endpoints.
+`;
+const TRUSTED_SCRIPT_MODE_REQUIREMENTS = `
+Script execution mode: TRUSTED.
+- Scripts run with full process environment and fewer runtime restrictions.
+- This mode is less secure and intended only for advanced/trusted scripts.
+- Prefer /script-db/* APIs for structured persistence even in trusted mode.
 `;
 
 type UserProfile = {
@@ -144,6 +175,7 @@ function getUserProfile(db: DbHandle): UserProfile | null {
 
 function buildSystemPrompt(db: DbHandle): string {
   const profile = getUserProfile(db);
+  const scriptExecutionMode = getScriptExecutionMode(db);
   const scriptSecrets = listSecrets(db, 500)
     .filter((item: any) => typeof item.name === "string" && item.name.startsWith("script."))
     .map((item: any) => {
@@ -173,11 +205,16 @@ function buildSystemPrompt(db: DbHandle): string {
 Script secret catalog (names + locations only; values are never exposed):
 ${scriptSecretLines.join("\n")}
 `.trim();
+  const scriptModeContext =
+    scriptExecutionMode === "trusted"
+      ? TRUSTED_SCRIPT_MODE_REQUIREMENTS
+      : SAFE_SCRIPT_MODE_REQUIREMENTS;
 
   if (!profile) {
     return `${BASE_SYSTEM_PROMPT}
 ${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
+${scriptModeContext}
 
 ${scriptSecretContext}`.trim();
   }
@@ -191,12 +228,14 @@ ${scriptSecretContext}`.trim();
     return `${BASE_SYSTEM_PROMPT}
 ${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
+${scriptModeContext}
 
 ${scriptSecretContext}`.trim();
   }
   return `${BASE_SYSTEM_PROMPT}
 ${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
+${scriptModeContext}
 
 ${scriptSecretContext}
 

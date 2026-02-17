@@ -63,6 +63,21 @@ import {
 import { runDiagnostics, listDiagnosticsRuns } from "./diagnostics";
 import { getSecretRef, getSecretValue, listSecrets, setSecretRef } from "./secrets";
 import { loadUiConfig } from "./ui-config";
+import {
+  listAiMemory,
+  listAiUserNotes,
+  listDbTables,
+  runReadOnlyQuery,
+  upsertAiMemory,
+  upsertAiUserNote
+} from "./agent-memory";
+import { getScriptDbSession } from "./script-db-sessions";
+import {
+  getScriptExecutionMode,
+  normalizeScriptExecutionMode,
+  setScriptExecutionMode
+} from "./script-security";
+import { extractUserMemoryNotes } from "./user-memory";
 
 const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
@@ -318,8 +333,25 @@ function parseApprovalMetadata(raw: string | null) {
   }
 }
 
+function resolveScriptDbToken(request: Request) {
+  const headerToken = request.headers.get("x-oc-script-db-token")?.trim();
+  if (headerToken) return headerToken;
+  const authHeader = request.headers.get("authorization") ?? "";
+  if (authHeader.startsWith("Bearer ")) {
+    const bearer = authHeader.slice(7).trim();
+    if (bearer) return bearer;
+  }
+  const queryToken = new URL(request.url).searchParams.get("token")?.trim();
+  return queryToken || "";
+}
+
+function getScriptDbSessionFromRequest(request: Request) {
+  const token = resolveScriptDbToken(request);
+  return getScriptDbSession(token);
+}
+
 function isBypassPath(pathname: string) {
-  return pathname.startsWith("/oauth/google/callback");
+  return pathname.startsWith("/oauth/google/callback") || pathname.startsWith("/script-db/");
 }
 
 async function exchangeGoogleCodeForToken(
@@ -565,6 +597,30 @@ app.post("/chat/messages", async ({ body }) => {
     data: { id: messageId, sessionId, requestId: requestId ?? null }
   });
 
+  if (role === "user") {
+    const notes = extractUserMemoryNotes(content);
+    for (const note of notes) {
+      upsertAiUserNote(db, {
+        subject: "primary_user",
+        noteKey: note.noteKey,
+        content: note.content,
+        tags: note.tags,
+        source: "auto_chat_memory"
+      });
+    }
+    if (notes.length > 0) {
+      writeEvent(db, {
+        type: "user.memory.notes_upserted",
+        data: {
+          sessionId,
+          messageId,
+          count: notes.length,
+          keys: notes.map((note) => note.noteKey)
+        }
+      });
+    }
+  }
+
   if (skipAgent || role !== "user") {
     return { ok: true, messageId };
   }
@@ -686,6 +742,163 @@ app.post("/chat/stream", async ({ body }) => {
     statusText: result.response.statusText,
     headers: origHeaders
   });
+});
+
+app.get("/script-db/tables", ({ request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  return {
+    ok: true,
+    readableTables: listDbTables(db),
+    writableTables: session.writableTables
+  };
+});
+
+app.post("/script-db/query", ({ body, request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  const payload = asObject(body);
+  const sql = typeof payload.sql === "string" ? payload.sql : "";
+  const params = Array.isArray(payload.params) ? payload.params : [];
+  const maxRows =
+    typeof payload.maxRows === "number" && Number.isFinite(payload.maxRows)
+      ? Number(payload.maxRows)
+      : undefined;
+  const result = runReadOnlyQuery(db, sql, params, maxRows);
+  if (!result.ok) {
+    set.status = 400;
+    return result;
+  }
+  writeAudit(db, {
+    actor: "script",
+    action: "script_db_read",
+    metadata: {
+      jobId: session.jobId,
+      jobRunId: session.jobRunId,
+      rowCount: result.rowCount
+    }
+  });
+  return result;
+});
+
+app.post("/script-db/notes/upsert", ({ body, request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  if (!session.writableTables.includes("ai_user_notes")) {
+    set.status = 403;
+    return { ok: false, error: "write_not_allowed_for_table_ai_user_notes" };
+  }
+  const payload = asObject(body);
+  const subject = typeof payload.subject === "string" ? payload.subject.trim() : "";
+  const noteKey = typeof payload.noteKey === "string" ? payload.noteKey.trim() : "";
+  const content = typeof payload.content === "string" ? payload.content : "";
+  if (!subject || !noteKey || !content.trim()) {
+    set.status = 400;
+    return { ok: false, error: "subject_noteKey_content_required" };
+  }
+  const tags = Array.isArray(payload.tags) ? payload.tags.map((item) => String(item)) : undefined;
+  const source = typeof payload.source === "string" ? payload.source : undefined;
+  upsertAiUserNote(db, { subject, noteKey, content, tags, source });
+  writeAudit(db, {
+    actor: "script",
+    action: "script_db_write_user_note",
+    metadata: {
+      jobId: session.jobId,
+      jobRunId: session.jobRunId,
+      subject,
+      noteKey
+    }
+  });
+  return { ok: true };
+});
+
+app.get("/script-db/notes", ({ query, request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  const subject = typeof query?.subject === "string" ? query.subject : undefined;
+  const limit =
+    typeof query?.limit === "string" && Number.isFinite(Number(query.limit))
+      ? Number(query.limit)
+      : 100;
+  return {
+    ok: true,
+    items: listAiUserNotes(db, subject, limit)
+  };
+});
+
+app.post("/script-db/memory/upsert", ({ body, request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  if (!session.writableTables.includes("ai_memory_store")) {
+    set.status = 403;
+    return { ok: false, error: "write_not_allowed_for_table_ai_memory_store" };
+  }
+  const payload = asObject(body);
+  const ownerType = typeof payload.ownerType === "string" ? payload.ownerType.trim() : "";
+  const ownerId = typeof payload.ownerId === "string" ? payload.ownerId.trim() : "";
+  const namespace = typeof payload.namespace === "string" ? payload.namespace.trim() : "";
+  const dataKey = typeof payload.dataKey === "string" ? payload.dataKey.trim() : "";
+  if (!ownerType || !ownerId || !namespace || !dataKey) {
+    set.status = 400;
+    return { ok: false, error: "ownerType_ownerId_namespace_dataKey_required" };
+  }
+  upsertAiMemory(db, {
+    ownerType,
+    ownerId,
+    namespace,
+    dataKey,
+    value: payload.value ?? null
+  });
+  writeAudit(db, {
+    actor: "script",
+    action: "script_db_write_memory",
+    metadata: {
+      jobId: session.jobId,
+      jobRunId: session.jobRunId,
+      ownerType,
+      ownerId,
+      namespace,
+      dataKey
+    }
+  });
+  return { ok: true };
+});
+
+app.get("/script-db/memory", ({ query, request, set }) => {
+  const session = getScriptDbSessionFromRequest(request);
+  if (!session) {
+    set.status = 401;
+    return { ok: false, error: "invalid_or_expired_script_db_token" };
+  }
+  const limit =
+    typeof query?.limit === "string" && Number.isFinite(Number(query.limit))
+      ? Number(query.limit)
+      : 100;
+  return {
+    ok: true,
+    items: listAiMemory(db, {
+      ownerType: typeof query?.ownerType === "string" ? query.ownerType : undefined,
+      ownerId: typeof query?.ownerId === "string" ? query.ownerId : undefined,
+      namespace: typeof query?.namespace === "string" ? query.namespace : undefined,
+      dataKey: typeof query?.dataKey === "string" ? query.dataKey : undefined,
+      limit
+    })
+  };
 });
 
 app.get("/approvals", () => ({ ok: true, items: listApprovals(db, 100) }));
@@ -1199,6 +1412,30 @@ app.post("/secrets/script", ({ body }) => {
       description
     }
   };
+});
+
+app.get("/settings/script-execution-mode", () => {
+  return {
+    ok: true,
+    mode: getScriptExecutionMode(db)
+  };
+});
+
+app.post("/settings/script-execution-mode", ({ body }) => {
+  const payload = asObject(body);
+  const mode = normalizeScriptExecutionMode(payload.mode);
+  const previous = getScriptExecutionMode(db);
+  setScriptExecutionMode(db, mode);
+  writeAudit(db, {
+    actor: "user",
+    action: "script_execution_mode_updated",
+    metadata: { previous, next: mode }
+  });
+  writeEvent(db, {
+    type: "settings.script_execution_mode.updated",
+    data: { previous, next: mode }
+  });
+  return { ok: true, mode };
 });
 
 app.get("/secrets/ai-key/status", () => {

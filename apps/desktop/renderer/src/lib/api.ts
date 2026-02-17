@@ -23,6 +23,8 @@ export type ScriptSecretItem = {
   description: string;
 };
 
+export type ScriptExecutionMode = "safe" | "trusted";
+
 export class OpenCorpoApi {
   constructor(
     private baseUrl: string,
@@ -284,6 +286,17 @@ export class OpenCorpoApi {
       ok: boolean;
       item: { name: string; ref: string; description: string };
     }>("/secrets/script", input);
+  }
+
+  async getScriptExecutionMode() {
+    return this.get<{ mode: ScriptExecutionMode }>("/settings/script-execution-mode");
+  }
+
+  async saveScriptExecutionMode(mode: ScriptExecutionMode) {
+    return this.post<{ ok: boolean; mode: ScriptExecutionMode }>(
+      "/settings/script-execution-mode",
+      { mode }
+    );
   }
 
   // Diagnostics

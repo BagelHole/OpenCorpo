@@ -33,6 +33,14 @@ import {
   proposeControlPlaneChange
 } from "./control-plane-changes";
 import { writeEvent } from "./events";
+import {
+  listAiMemory,
+  listAiUserNotes,
+  listDbTables,
+  runReadOnlyQuery,
+  upsertAiMemory,
+  upsertAiUserNote
+} from "./agent-memory";
 import { runHttpGet, runWebSearch } from "./web-tools";
 
 const TOOL_SCHEMA_JSON = `{
@@ -250,6 +258,111 @@ export function buildAgentTools(context: AgentContext) {
       execute: withToolTelemetry(context, "get_help", async () => buildHelpText())
     }),
 
+    db_list_tables: tool({
+      description: "List all database tables. Use before custom DB reads.",
+      inputSchema: z.object({}),
+      execute: withToolTelemetry(context, "db_list_tables", async () => listDbTables(context.db))
+    }),
+
+    db_read_query: tool({
+      description:
+        "Run a read-only SQL query against SQLite to inspect existing data (including historical conversations). Allowed statements: SELECT/PRAGMA/EXPLAIN/CTE.",
+      inputSchema: z.object({
+        sql: z.string().min(1),
+        params: z
+          .array(z.union([z.string(), z.number(), z.boolean(), z.null()]))
+          .optional(),
+        max_rows: z.number().min(1).max(500).optional()
+      }),
+      execute: withToolTelemetry(context, "db_read_query", async ({ sql, params, max_rows }) =>
+        runReadOnlyQuery(context.db, sql, params ?? [], max_rows))
+    }),
+
+    upsert_user_note: tool({
+      description:
+        "Create/update a user note in ai_user_notes. Use for persistent user-specific notes.",
+      inputSchema: z.object({
+        subject: z.string().min(1).describe("User/person/entity key, e.g. primary_user"),
+        note_key: z.string().min(1).describe("Stable key for this note"),
+        content: z.string().min(1),
+        tags: z.array(z.string()).optional(),
+        source: z.string().optional()
+      }),
+      execute: withToolTelemetry(
+        context,
+        "upsert_user_note",
+        async ({ subject, note_key, content, tags, source }) => {
+          upsertAiUserNote(context.db, {
+            subject,
+            noteKey: note_key,
+            content,
+            tags,
+            source
+          });
+          return { ok: true };
+        }
+      )
+    }),
+
+    list_user_notes: tool({
+      description: "List user notes from ai_user_notes, optionally filtered by subject.",
+      inputSchema: z.object({
+        subject: z.string().optional(),
+        limit: z.number().min(1).max(500).optional()
+      }),
+      execute: withToolTelemetry(context, "list_user_notes", async ({ subject, limit }) =>
+        listAiUserNotes(context.db, subject, limit ?? 100))
+    }),
+
+    upsert_memory_record: tool({
+      description:
+        "Write persistent AI/job/page data into ai_memory_store. This is the allowed long-term write table for automation output.",
+      inputSchema: z.object({
+        owner_type: z.string().min(1).describe("Scope type, e.g. page, job, agent"),
+        owner_id: z.string().min(1).describe("Scope id/name"),
+        namespace: z.string().min(1).describe("Logical group, e.g. dashboard"),
+        data_key: z.string().min(1),
+        value: z.unknown()
+      }),
+      execute: withToolTelemetry(
+        context,
+        "upsert_memory_record",
+        async ({ owner_type, owner_id, namespace, data_key, value }) => {
+          upsertAiMemory(context.db, {
+            ownerType: owner_type,
+            ownerId: owner_id,
+            namespace,
+            dataKey: data_key,
+            value
+          });
+          return { ok: true };
+        }
+      )
+    }),
+
+    list_memory_records: tool({
+      description: "Read records from ai_memory_store with optional filters.",
+      inputSchema: z.object({
+        owner_type: z.string().optional(),
+        owner_id: z.string().optional(),
+        namespace: z.string().optional(),
+        data_key: z.string().optional(),
+        limit: z.number().min(1).max(500).optional()
+      }),
+      execute: withToolTelemetry(
+        context,
+        "list_memory_records",
+        async ({ owner_type, owner_id, namespace, data_key, limit }) =>
+          listAiMemory(context.db, {
+            ownerType: owner_type,
+            ownerId: owner_id,
+            namespace,
+            dataKey: data_key,
+            limit: limit ?? 100
+          })
+      )
+    }),
+
     http_get: tool({
       description:
         "Fetch a public HTTP(S) URL. Use for docs pages and API responses. Private/local hosts are blocked.",
@@ -348,7 +461,7 @@ export function buildAgentTools(context: AgentContext) {
 
     propose_config_change: tool({
       description:
-        "Propose a change to control plane config (tools, jobs, workflows, ui, policy). Target: tools/*.json, jobs/*.json, workflows/*.json, ui/*.json, policy.json. High-risk requires approval.",
+        "Propose a change to control plane config (tools, jobs, workflows, ui, policy). Target: tools/*.json, jobs/*.json, workflows/*.json, ui/*.json, policy.json. For script jobs use top-level script.path (not steps.tool=script.run). High-risk requires approval.",
       inputSchema: z.object({
         relative_path: z
           .string()
