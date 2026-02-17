@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useOpenCorpo } from "@/context/OpenCorpoContext";
@@ -20,6 +20,7 @@ function shouldShowNavItem(item: UiSidebarItem, advancedMode: boolean) {
 export function App() {
   const state = useOpenCorpo();
   const location = useLocation();
+  const navigate = useNavigate();
   const LAST_PAGE_PATH_KEY = "opencorpo_last_page_path_v1";
   const [advancedMode, setAdvancedMode] = useState(() => {
     try {
@@ -76,6 +77,70 @@ export function App() {
     const next = !sidebarCollapsed;
     setSidebarCollapsed(next);
     localStorage.setItem("opencorpo_sidebar_collapsed", String(next));
+  };
+
+  const deleteSidebarItem = async (item: UiSidebarItem) => {
+    if (!state.api) return;
+    const page = pageById.get(item.pageId);
+    if (!page || page.kind !== "base") return;
+    const ok = window.confirm(`Delete "${item.label}" from the sidebar and remove its page?`);
+    if (!ok) return;
+
+    const nextSidebarItems = state.uiConfig.sidebar.items.filter((row) => row.id !== item.id);
+    if (nextSidebarItems.length === 0) {
+      window.alert("Cannot delete the last sidebar item.");
+      return;
+    }
+    const pageStillReferenced = nextSidebarItems.some((row) => row.pageId === item.pageId);
+    const nextPages = pageStillReferenced
+      ? state.uiConfig.pages
+      : state.uiConfig.pages.filter((row) => row.id !== item.pageId);
+    const afterJson = {
+      ...state.uiConfig,
+      sidebar: {
+        ...state.uiConfig.sidebar,
+        items: nextSidebarItems,
+      },
+      pages: nextPages,
+    };
+
+    const proposeRes = await state.api.post<{
+      ok: boolean;
+      error?: string;
+      details?: string[];
+      item?: { id: number };
+    }>("/control-plane/changes/propose", {
+      actor: "user",
+      relativePath: "ui/desktop.json",
+      summary: `Delete sidebar item ${item.label}`,
+      afterJson,
+    });
+    if (!proposeRes.ok || !proposeRes.data.ok || !proposeRes.data.item?.id) {
+      const error = proposeRes.ok
+        ? proposeRes.data.error ?? "Failed to propose UI delete change."
+        : proposeRes.error;
+      const details = proposeRes.ok ? proposeRes.data.details?.join("\n") : "";
+      window.alert(details ? `${error}\n\n${details}` : error);
+      return;
+    }
+
+    const applyRes = await state.api.post<{ ok: boolean; error?: string }>(
+      `/control-plane/changes/${proposeRes.data.item.id}/apply`
+    );
+    if (!applyRes.ok || !applyRes.data.ok) {
+      const error = applyRes.ok ? applyRes.data.error ?? "Failed to apply UI delete change." : applyRes.error;
+      window.alert(error);
+      return;
+    }
+
+    await state.refreshData();
+    if (location.pathname === item.path) {
+      const nextPath =
+        nextSidebarItems.find((row) => shouldShowNavItem(row, advancedMode))?.path ??
+        nextSidebarItems[0]?.path ??
+        "/";
+      navigate(nextPath, { replace: true });
+    }
   };
 
   const renderPage = (pageId: string) => {
@@ -219,24 +284,45 @@ export function App() {
                 {sidebarCollapsed ? ">" : "<"}
               </button>
             )}
-            {navItems.map((item) => (
-              <NavLink
-                key={item.id}
-                to={item.path}
-                className={({ isActive }) =>
-                  cn(
-                    "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    sidebarCollapsed && "px-2 text-center",
-                    isActive
-                      ? "bg-[var(--oc-accent)] text-[var(--oc-bg)]"
-                      : "text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border)] hover:text-[var(--oc-ink)]"
-                  )
-                }
-                title={item.label}
-              >
-                {sidebarCollapsed ? item.label.slice(0, 1) : item.label}
-              </NavLink>
-            ))}
+            {navItems.map((item) => {
+              const page = pageById.get(item.pageId);
+              const canDelete = !sidebarCollapsed && page?.kind === "base";
+              return (
+                <div key={item.id} className="group relative">
+                  <NavLink
+                    to={item.path}
+                    className={({ isActive }) =>
+                      cn(
+                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        sidebarCollapsed && "px-2 text-center",
+                        canDelete && "pr-9",
+                        isActive
+                          ? "bg-[var(--oc-accent)] text-[var(--oc-bg)]"
+                          : "text-[var(--oc-ink-muted)] hover:bg-[var(--oc-border)] hover:text-[var(--oc-ink)]"
+                      )
+                    }
+                    title={item.label}
+                  >
+                    {sidebarCollapsed ? item.label.slice(0, 1) : item.label}
+                  </NavLink>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void deleteSidebarItem(item);
+                      }}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-xs text-[var(--oc-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--oc-danger-bg)] hover:text-[var(--oc-danger)] group-hover:opacity-100"
+                      title={`Delete ${item.label}`}
+                      aria-label={`Delete ${item.label}`}
+                    >
+                      X
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </nav>
         </aside>
 
