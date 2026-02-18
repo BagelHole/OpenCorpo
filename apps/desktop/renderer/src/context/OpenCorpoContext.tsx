@@ -1104,17 +1104,35 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           ? provider
           : null;
       if (!normalizedProvider) return;
+      const activeId = activeChatSessionIdRef.current;
+      const currentSession =
+        activeId !== null
+          ? chatSessions.find((session) => session.id === activeId) ?? null
+          : null;
+      let cachedModel = currentSession?.metadata.model?.trim() || undefined;
+      if (!cachedModel) {
+        try {
+          const raw = localStorage.getItem(LAST_CHAT_SELECTION_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { model?: unknown };
+            cachedModel =
+              typeof parsed.model === "string" && parsed.model.trim()
+                ? parsed.model.trim()
+                : undefined;
+          }
+        } catch {
+          // ignore storage read errors
+        }
+      }
       try {
         localStorage.setItem(
           LAST_CHAT_SELECTION_KEY,
-          JSON.stringify({ provider: normalizedProvider })
+          JSON.stringify({ provider: normalizedProvider, model: cachedModel })
         );
       } catch {
         // ignore storage write errors
       }
-      const activeId = activeChatSessionIdRef.current;
       if (!activeId) return;
-      const currentSession = chatSessions.find((session) => session.id === activeId);
       if (!currentSession) return;
       await updateChatSession(activeId, {
         title: currentSession.title,
@@ -1268,21 +1286,21 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, [refreshDaemonStatus, refreshData]);
 
   useEffect(() => {
-    let mounted = true;
-    async function init() {
-      const status = await refreshDaemonStatus();
-      if (mounted && status?.ready) {
-        await refreshData();
-        await runDiagnosticsNow();
-      }
-    }
-    void init();
-    const interval = setInterval(() => {
-      void refreshDaemonStatus().then(() => refreshData());
+    // Keep startup light so cached UI/chat renders immediately while daemon sync catches up.
+    void refreshDaemonStatus();
+    const statusInterval = setInterval(() => {
+      void refreshDaemonStatus();
     }, 3000);
+    const dataInterval = setInterval(() => {
+      void refreshData();
+    }, 15000);
+    const diagnosticsTimeout = setTimeout(() => {
+      void runDiagnosticsNow();
+    }, 8000);
     return () => {
-      mounted = false;
-      clearInterval(interval);
+      clearInterval(statusInterval);
+      clearInterval(dataInterval);
+      clearTimeout(diagnosticsTimeout);
     };
   }, [refreshDaemonStatus, refreshData, runDiagnosticsNow]);
 

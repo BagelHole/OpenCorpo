@@ -293,6 +293,23 @@ function mergeUiWithExisting(
 
   const merged: Record<string, unknown> = { ...beforeJson, ...afterJson };
 
+  const beforeTheme = asRecord(beforeJson.theme);
+  const afterTheme = asRecord(afterJson.theme);
+  if (beforeTheme || afterTheme) {
+    const mergedTheme: Record<string, unknown> = { ...(beforeTheme ?? {}), ...(afterTheme ?? {}) };
+    const beforeLight = asRecord(beforeTheme?.light);
+    const afterLight = asRecord(afterTheme?.light);
+    if (beforeLight || afterLight) {
+      mergedTheme.light = { ...(beforeLight ?? {}), ...(afterLight ?? {}) };
+    }
+    const beforeDark = asRecord(beforeTheme?.dark);
+    const afterDark = asRecord(afterTheme?.dark);
+    if (beforeDark || afterDark) {
+      mergedTheme.dark = { ...(beforeDark ?? {}), ...(afterDark ?? {}) };
+    }
+    merged.theme = mergedTheme;
+  }
+
   const beforeSidebar = asRecord(beforeJson.sidebar);
   const afterSidebar = asRecord(afterJson.sidebar);
   if (beforeSidebar || afterSidebar) {
@@ -490,6 +507,7 @@ function formatUiValidationHelp(details: string[] | undefined) {
   if (!hasOneOf) return base;
   const help = [
     "UI block validation hint:",
+    'Top-level theme shape: {"theme":{"light":{"accent":"#111"},"dark":{"accent":"#fafafa"}}}.',
     "Supported block types: markdown, stats, list, note, key_value, job_results, job_table, actions, react_widget, terminal_widget, web_embed.",
     'Valid actions block shape: {"type":"actions","buttons":[{"label":"Run","action":{"type":"run_job","jobName":"my-job"}}]}',
     'Valid open_url button shape: {"label":"Docs","action":{"type":"open_url","url":"https://example.com"}}',

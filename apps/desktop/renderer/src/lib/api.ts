@@ -438,6 +438,34 @@ export type UiSidebarItem = {
   showWhen?: "always" | "advanced";
 };
 
+export type UiThemeTokens = Partial<{
+  bg: string;
+  bgElevated: string;
+  ink: string;
+  inkMuted: string;
+  border: string;
+  borderStrong: string;
+  accent: string;
+  accentHover: string;
+  success: string;
+  successBg: string;
+  warning: string;
+  warningBg: string;
+  danger: string;
+  dangerBg: string;
+  radius: string;
+  radiusSm: string;
+  shadow: string;
+  shadowLg: string;
+  fontSans: string;
+  fontMono: string;
+}>;
+
+export type UiThemeConfig = {
+  light?: UiThemeTokens;
+  dark?: UiThemeTokens;
+};
+
 export type UiBuiltinPage = {
   id: string;
   kind: "builtin";
@@ -544,6 +572,7 @@ export type UiPage = UiBuiltinPage | UiBasePage;
 
 export type UiConfig = {
   name: string;
+  theme?: UiThemeConfig;
   sidebar: {
     collapsible: boolean;
     defaultCollapsed?: boolean;

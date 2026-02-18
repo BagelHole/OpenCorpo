@@ -9,6 +9,34 @@ export type UiSidebarItem = {
   showWhen?: "always" | "advanced";
 };
 
+export type UiThemeTokens = Partial<{
+  bg: string;
+  bgElevated: string;
+  ink: string;
+  inkMuted: string;
+  border: string;
+  borderStrong: string;
+  accent: string;
+  accentHover: string;
+  success: string;
+  successBg: string;
+  warning: string;
+  warningBg: string;
+  danger: string;
+  dangerBg: string;
+  radius: string;
+  radiusSm: string;
+  shadow: string;
+  shadowLg: string;
+  fontSans: string;
+  fontMono: string;
+}>;
+
+export type UiThemeConfig = {
+  light?: UiThemeTokens;
+  dark?: UiThemeTokens;
+};
+
 export type UiBuiltinPage = {
   id: string;
   kind: "builtin";
@@ -115,6 +143,7 @@ export type UiPage = UiBuiltinPage | UiBasePage;
 
 export type UiConfig = {
   name: string;
+  theme?: UiThemeConfig;
   sidebar: {
     collapsible: boolean;
     defaultCollapsed?: boolean;
@@ -148,6 +177,52 @@ const FALLBACK_UI_CONFIG: UiConfig = {
     { id: "audit", kind: "builtin", builtin: "audit" }
   ]
 };
+
+const THEME_TOKEN_KEYS: Array<keyof UiThemeTokens> = [
+  "bg",
+  "bgElevated",
+  "ink",
+  "inkMuted",
+  "border",
+  "borderStrong",
+  "accent",
+  "accentHover",
+  "success",
+  "successBg",
+  "warning",
+  "warningBg",
+  "danger",
+  "dangerBg",
+  "radius",
+  "radiusSm",
+  "shadow",
+  "shadowLg",
+  "fontSans",
+  "fontMono"
+];
+
+function sanitizeThemeTokens(value: unknown): UiThemeTokens | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const out: UiThemeTokens = {};
+  for (const key of THEME_TOKEN_KEYS) {
+    const raw = row[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    out[key] = trimmed;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeThemeConfig(value: unknown): UiThemeConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const light = sanitizeThemeTokens(row.light);
+  const dark = sanitizeThemeTokens(row.dark);
+  if (!light && !dark) return undefined;
+  return { light, dark };
+}
 
 function sanitizeUiConfig(config: UiConfig): UiConfig {
   const pages = Array.isArray(config.pages) ? config.pages : [];
@@ -184,6 +259,7 @@ function sanitizeUiConfig(config: UiConfig): UiConfig {
 
   return {
     name: typeof config.name === "string" && config.name.trim() ? config.name : "desktop-default",
+    theme: sanitizeThemeConfig(config.theme),
     sidebar: {
       collapsible: Boolean(config.sidebar?.collapsible),
       defaultCollapsed: Boolean(config.sidebar?.defaultCollapsed),

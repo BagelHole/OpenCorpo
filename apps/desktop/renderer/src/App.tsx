@@ -12,6 +12,29 @@ import { BaseUiPageView } from "@/views/BaseUiPageView";
 import { cn } from "@/lib/utils";
 import type { UiPage, UiSidebarItem } from "@/lib/api";
 
+const THEME_TOKEN_TO_CSS_SUFFIX: Record<string, string> = {
+  bg: "bg",
+  bgElevated: "bg-elevated",
+  ink: "ink",
+  inkMuted: "ink-muted",
+  border: "border",
+  borderStrong: "border-strong",
+  accent: "accent",
+  accentHover: "accent-hover",
+  success: "success",
+  successBg: "success-bg",
+  warning: "warning",
+  warningBg: "warning-bg",
+  danger: "danger",
+  dangerBg: "danger-bg",
+  radius: "radius",
+  radiusSm: "radius-sm",
+  shadow: "shadow",
+  shadowLg: "shadow-lg",
+  fontSans: "font-sans",
+  fontMono: "font-mono"
+};
+
 function shouldShowNavItem(item: UiSidebarItem, advancedMode: boolean) {
   if (item.showWhen === "advanced") return advancedMode;
   return true;
@@ -58,6 +81,30 @@ export function App() {
     }
     return firstPath;
   }, [navItems]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const theme = state.uiConfig.theme;
+    for (const suffix of Object.values(THEME_TOKEN_TO_CSS_SUFFIX)) {
+      root.style.removeProperty(`--oc-light-${suffix}`);
+      root.style.removeProperty(`--oc-dark-${suffix}`);
+    }
+
+    if (theme?.light) {
+      for (const [token, value] of Object.entries(theme.light)) {
+        const suffix = THEME_TOKEN_TO_CSS_SUFFIX[token];
+        if (!suffix || typeof value !== "string" || !value.trim()) continue;
+        root.style.setProperty(`--oc-light-${suffix}`, value);
+      }
+    }
+    if (theme?.dark) {
+      for (const [token, value] of Object.entries(theme.dark)) {
+        const suffix = THEME_TOKEN_TO_CSS_SUFFIX[token];
+        if (!suffix || typeof value !== "string" || !value.trim()) continue;
+        root.style.setProperty(`--oc-dark-${suffix}`, value);
+      }
+    }
+  }, [state.uiConfig.theme]);
 
   useEffect(() => {
     if (!navItems.some((item) => item.path === location.pathname)) return;

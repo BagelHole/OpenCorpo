@@ -3,49 +3,80 @@
 
 :root,
 .light {
-  --oc-bg: #fafafa;
-  --oc-bg-elevated: #ffffff;
-  --oc-ink: #0a0a0a;
-  --oc-ink-muted: #737373;
-  --oc-border: #e5e5e5;
-  --oc-border-strong: #a3a3a3;
-  --oc-accent: #0a0a0a;
-  --oc-accent-hover: #262626;
-  --oc-success: #16a34a;
-  --oc-success-bg: #dcfce7;
-  --oc-warning: #ca8a04;
-  --oc-warning-bg: #fef9c3;
-  --oc-danger: #dc2626;
-  --oc-danger-bg: #fee2e2;
-  --oc-radius: 0.75rem;
-  --oc-radius-sm: 0.5rem;
-  --oc-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --oc-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --oc-bg: var(--oc-light-bg, #fafafa);
+  --oc-bg-elevated: var(--oc-light-bg-elevated, #ffffff);
+  --oc-ink: var(--oc-light-ink, #0a0a0a);
+  --oc-ink-muted: var(--oc-light-ink-muted, #737373);
+  --oc-border: var(--oc-light-border, #e5e5e5);
+  --oc-border-strong: var(--oc-light-border-strong, #a3a3a3);
+  --oc-accent: var(--oc-light-accent, #0a0a0a);
+  --oc-accent-hover: var(--oc-light-accent-hover, #262626);
+  --oc-success: var(--oc-light-success, #16a34a);
+  --oc-success-bg: var(--oc-light-success-bg, #dcfce7);
+  --oc-warning: var(--oc-light-warning, #ca8a04);
+  --oc-warning-bg: var(--oc-light-warning-bg, #fef9c3);
+  --oc-danger: var(--oc-light-danger, #dc2626);
+  --oc-danger-bg: var(--oc-light-danger-bg, #fee2e2);
+  --oc-radius: var(--oc-light-radius, 0.75rem);
+  --oc-radius-sm: var(--oc-light-radius-sm, 0.5rem);
+  --oc-shadow: var(--oc-light-shadow, 0 1px 3px rgba(0, 0, 0, 0.08));
+  --oc-shadow-lg: var(--oc-light-shadow-lg, 0 4px 12px rgba(0, 0, 0, 0.1));
+  --oc-font-sans: var(--oc-light-font-sans, "DM Sans", system-ui, sans-serif);
+  --oc-font-mono: var(
+    --oc-light-font-mono,
+    "JetBrains Mono",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace
+  );
 }
 
 .dark {
-  --oc-bg: #0a0a0a;
-  --oc-bg-elevated: #171717;
-  --oc-ink: #fafafa;
-  --oc-ink-muted: #a3a3a3;
-  --oc-border: #262626;
-  --oc-border-strong: #525252;
-  --oc-accent: #fafafa;
-  --oc-accent-hover: #e5e5e5;
-  --oc-success: #22c55e;
-  --oc-success-bg: #14532d;
-  --oc-warning: #eab308;
-  --oc-warning-bg: #422006;
-  --oc-danger: #ef4444;
-  --oc-danger-bg: #450a0a;
-  --oc-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --oc-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --oc-bg: var(--oc-dark-bg, #0a0a0a);
+  --oc-bg-elevated: var(--oc-dark-bg-elevated, #171717);
+  --oc-ink: var(--oc-dark-ink, #fafafa);
+  --oc-ink-muted: var(--oc-dark-ink-muted, #a3a3a3);
+  --oc-border: var(--oc-dark-border, #262626);
+  --oc-border-strong: var(--oc-dark-border-strong, #525252);
+  --oc-accent: var(--oc-dark-accent, #fafafa);
+  --oc-accent-hover: var(--oc-dark-accent-hover, #e5e5e5);
+  --oc-success: var(--oc-dark-success, #22c55e);
+  --oc-success-bg: var(--oc-dark-success-bg, #14532d);
+  --oc-warning: var(--oc-dark-warning, #eab308);
+  --oc-warning-bg: var(--oc-dark-warning-bg, #422006);
+  --oc-danger: var(--oc-dark-danger, #ef4444);
+  --oc-danger-bg: var(--oc-dark-danger-bg, #450a0a);
+  --oc-radius: var(--oc-dark-radius, var(--oc-light-radius, 0.75rem));
+  --oc-radius-sm: var(--oc-dark-radius-sm, var(--oc-light-radius-sm, 0.5rem));
+  --oc-shadow: var(--oc-dark-shadow, 0 1px 3px rgba(0, 0, 0, 0.3));
+  --oc-shadow-lg: var(--oc-dark-shadow-lg, 0 4px 12px rgba(0, 0, 0, 0.4));
+  --oc-font-sans: var(--oc-dark-font-sans, var(--oc-light-font-sans, "DM Sans", system-ui, sans-serif));
+  --oc-font-mono: var(
+    --oc-dark-font-mono,
+    var(
+      --oc-light-font-mono,
+      "JetBrains Mono",
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Monaco,
+      Consolas,
+      "Liberation Mono",
+      "Courier New",
+      monospace
+    )
+  );
 }
 
 html {
   background: var(--oc-bg);
   color: var(--oc-ink);
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: var(--oc-font-sans);
   font-size: clamp(14px, 1.5vw, 16px);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -131,8 +162,7 @@ button, input, textarea {
   border-radius: 0.3rem;
   background: var(--oc-bg);
   padding: 0.1rem 0.3rem;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family: var(--oc-font-mono);
   font-size: 0.86em;
 }
 

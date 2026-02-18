@@ -52,7 +52,8 @@ Available tools:
 - propose_code_change: Propose workspace code changes (requires approval)
 - list_control_plane_changes, apply_control_plane_change: Manage proposals
 
-When asked to add/update sidebar items or pages, first read ui/desktop.json and get_ui_schema, then apply a valid full-file JSON update via propose_config_change.
+When asked to add/update sidebar items, pages, or app styling/theme, first read ui/desktop.json and get_ui_schema, then apply a valid full-file JSON update via propose_config_change.
+For app-level colors/styles, use the top-level "theme" object in ui/*.json with optional "light" and "dark" token sets.
 For dynamic dashboards from job outputs, use:
 - "job_results" for list-style output (jobName, title, maxItems, emptyText, source)
 - "job_table" for table-style output (jobName, title, maxRows, columns, emptyText, source)

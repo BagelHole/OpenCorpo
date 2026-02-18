@@ -6,6 +6,64 @@
   "properties": {
     "$schema": { "type": "string" },
     "name": { "type": "string", "minLength": 1 },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "light": {
+          "type": "object",
+          "properties": {
+            "bg": { "type": "string", "minLength": 1 },
+            "bgElevated": { "type": "string", "minLength": 1 },
+            "ink": { "type": "string", "minLength": 1 },
+            "inkMuted": { "type": "string", "minLength": 1 },
+            "border": { "type": "string", "minLength": 1 },
+            "borderStrong": { "type": "string", "minLength": 1 },
+            "accent": { "type": "string", "minLength": 1 },
+            "accentHover": { "type": "string", "minLength": 1 },
+            "success": { "type": "string", "minLength": 1 },
+            "successBg": { "type": "string", "minLength": 1 },
+            "warning": { "type": "string", "minLength": 1 },
+            "warningBg": { "type": "string", "minLength": 1 },
+            "danger": { "type": "string", "minLength": 1 },
+            "dangerBg": { "type": "string", "minLength": 1 },
+            "radius": { "type": "string", "minLength": 1 },
+            "radiusSm": { "type": "string", "minLength": 1 },
+            "shadow": { "type": "string", "minLength": 1 },
+            "shadowLg": { "type": "string", "minLength": 1 },
+            "fontSans": { "type": "string", "minLength": 1 },
+            "fontMono": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "dark": {
+          "type": "object",
+          "properties": {
+            "bg": { "type": "string", "minLength": 1 },
+            "bgElevated": { "type": "string", "minLength": 1 },
+            "ink": { "type": "string", "minLength": 1 },
+            "inkMuted": { "type": "string", "minLength": 1 },
+            "border": { "type": "string", "minLength": 1 },
+            "borderStrong": { "type": "string", "minLength": 1 },
+            "accent": { "type": "string", "minLength": 1 },
+            "accentHover": { "type": "string", "minLength": 1 },
+            "success": { "type": "string", "minLength": 1 },
+            "successBg": { "type": "string", "minLength": 1 },
+            "warning": { "type": "string", "minLength": 1 },
+            "warningBg": { "type": "string", "minLength": 1 },
+            "danger": { "type": "string", "minLength": 1 },
+            "dangerBg": { "type": "string", "minLength": 1 },
+            "radius": { "type": "string", "minLength": 1 },
+            "radiusSm": { "type": "string", "minLength": 1 },
+            "shadow": { "type": "string", "minLength": 1 },
+            "shadowLg": { "type": "string", "minLength": 1 },
+            "fontSans": { "type": "string", "minLength": 1 },
+            "fontMono": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "sidebar": {
       "type": "object",
       "required": ["collapsible", "items"],
