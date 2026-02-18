@@ -4,11 +4,23 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { AgentContext, AgentReply, AgentToolEvent } from "./agent";
 import { buildAgentTools } from "./agent-tools";
 import type { DbHandle } from "./db";
-import { getSecretValue, listSecrets } from "./secrets";
+import { getSecretValue, listSecrets, setSecretRef } from "./secrets";
 import { getScriptExecutionMode } from "./script-security";
+import { extractCodexAccountId, refreshCodexAccessToken } from "./codex-auth";
+import { writeAudit } from "./audit";
+import { writeEvent } from "./events";
 
 const DEFAULT_GATEWAY_MODEL = "anthropic/claude-sonnet-4.5";
 const DEFAULT_OPENAI_MODEL = "gpt-5.2-chat-latest";
+const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
+const CODEX_SUPPORTED_MODELS = new Set([
+  "gpt-5.2-codex",
+  "gpt-5.2",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1"
+]);
 
 const BASE_SYSTEM_PROMPT = `You are OpenCorpo, a self-configuring business operating system. You help users manage approvals, jobs, audit logs, tools, and plugins. You can also propose changes to add new tools, jobs, and workflows.
 
@@ -144,6 +156,7 @@ type ModelDefaults = {
   openai?: string;
   local?: string;
   gateway?: string;
+  codex?: string;
 };
 
 type ModelOptions = {
@@ -158,6 +171,10 @@ function getApiKey(db: DbHandle): string | null {
     getSecretValue(db, "ai.api_key") ??
     null
   );
+}
+
+function getOpenAiKey(db: DbHandle): string | null {
+  return process.env.OPENAI_API_KEY ?? getSecretValue(db, "ai.api_key.openai") ?? getApiKey(db);
 }
 
 function getAiProvider(db: DbHandle): string {
@@ -185,11 +202,78 @@ function getModelDefaults(db: DbHandle): ModelDefaults {
         typeof parsed.anthropic === "string" ? parsed.anthropic.trim() : undefined,
       openai: typeof parsed.openai === "string" ? parsed.openai.trim() : undefined,
       local: typeof parsed.local === "string" ? parsed.local.trim() : undefined,
-      gateway: typeof parsed.gateway === "string" ? parsed.gateway.trim() : undefined
+      gateway: typeof parsed.gateway === "string" ? parsed.gateway.trim() : undefined,
+      codex: typeof parsed.codex === "string" ? parsed.codex.trim() : undefined
     };
   } catch {
     return {};
   }
+}
+
+function readCodexSession(db: DbHandle) {
+  const accessToken = (getSecretValue(db, "ai.codex.access_token") ?? "").trim();
+  const refreshToken = (getSecretValue(db, "ai.codex.refresh_token") ?? "").trim();
+  const accountId = (getSecretValue(db, "ai.codex.account_id") ?? "").trim();
+  const expiresAtRaw = (getSecretValue(db, "ai.codex.expires_at") ?? "").trim();
+  const expiresAtMs = Date.parse(expiresAtRaw);
+  return {
+    accessToken,
+    refreshToken,
+    accountId,
+    expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : null
+  };
+}
+
+async function resolveCodexSession(db: DbHandle) {
+  const session = readCodexSession(db);
+  if (!session.accessToken || !session.refreshToken) return null;
+  const shouldRefresh =
+    !session.expiresAtMs || session.expiresAtMs - Date.now() < 2 * 60 * 1000;
+  if (!shouldRefresh) {
+    return session.accountId
+      ? session
+      : { ...session, accountId: extractCodexAccountId(session.accessToken) ?? "" };
+  }
+  const refreshed = await refreshCodexAccessToken(session.refreshToken);
+  if (!refreshed.ok) {
+    console.error("[agent-llm] Codex token refresh failed:", refreshed.error);
+    return null;
+  }
+  const refreshedAccountId = extractCodexAccountId(refreshed.accessToken) ?? session.accountId;
+  const expiresAt = new Date(Date.now() + refreshed.expiresIn * 1000).toISOString();
+  setSecretRef(db, {
+    name: "ai.codex.access_token",
+    value: refreshed.accessToken,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.codex.refresh_token",
+    value: refreshed.refreshToken,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.codex.expires_at",
+    value: expiresAt,
+    provider: "openai_oauth_codex"
+  });
+  if (refreshedAccountId) {
+    setSecretRef(db, {
+      name: "ai.codex.account_id",
+      value: refreshedAccountId,
+      provider: "openai_oauth_codex"
+    });
+  }
+  writeAudit(db, { actor: "system", action: "codex_oauth_refresh" });
+  writeEvent(db, {
+    type: "connector.codex.refreshed",
+    data: { expiresAt }
+  });
+  return {
+    accessToken: refreshed.accessToken,
+    refreshToken: refreshed.refreshToken,
+    accountId: refreshedAccountId,
+    expiresAtMs: Date.parse(expiresAt)
+  };
 }
 
 function getUserProfile(db: DbHandle): UserProfile | null {
@@ -364,8 +448,9 @@ function buildFallbackSummary(events: AgentToolEvent[]): string {
 }
 
 async function synthesizeSummaryWithLLM(
-  model: ReturnType<typeof createModel>,
-  events: AgentToolEvent[]
+  model: any,
+  events: AgentToolEvent[],
+  options?: { codex?: boolean }
 ) {
   const compactEvents = events.map((event) => ({
     phase: event.phase,
@@ -390,6 +475,14 @@ async function synthesizeSummaryWithLLM(
     model,
     system: summarySystemPrompt,
     messages: [{ role: "user", content: summaryUserPrompt }],
+    providerOptions: options?.codex
+      ? {
+          openai: {
+            instructions: summarySystemPrompt,
+            store: false
+          }
+        }
+      : undefined,
     stopWhen: stepCountIs(1)
   });
 
@@ -400,16 +493,20 @@ async function synthesizeSummaryWithLLM(
   return summaryText.trim();
 }
 
-function normalizeProvider(provider: string | undefined): "openai" | "gateway" {
+function normalizeProvider(provider: string | undefined): "openai" | "gateway" | "codex" {
   const value = (provider ?? "").trim().toLowerCase();
   if (value === "openai") return "openai";
+  if (value === "codex") return "codex";
   if (value === "anthropic" || value === "local" || value === "gateway") {
     return "gateway";
   }
   return "gateway";
 }
 
-function createModel(db: DbHandle, apiKey: string, options?: ModelOptions) {
+async function createModel(
+  db: DbHandle,
+  options?: ModelOptions
+): Promise<{ model: any; provider: "openai" | "gateway" | "codex" } | null> {
   const modelDefaults = getModelDefaults(db);
   const configuredProvider = getAiProvider(db);
   const overrideProvider = options?.provider?.trim().toLowerCase();
@@ -417,28 +514,62 @@ function createModel(db: DbHandle, apiKey: string, options?: ModelOptions) {
     ? normalizeProvider(overrideProvider)
     : configuredProvider
       ? normalizeProvider(configuredProvider)
-      : inferProviderFromKey(apiKey);
+      : inferProviderFromKey((getApiKey(db) ?? "").trim());
   const providerKey = (overrideProvider || configuredProvider || "").trim().toLowerCase();
   const fallbackDefault =
-    selectedProvider === "openai" ? DEFAULT_OPENAI_MODEL : DEFAULT_GATEWAY_MODEL;
+    selectedProvider === "openai"
+      ? DEFAULT_OPENAI_MODEL
+      : selectedProvider === "codex"
+        ? DEFAULT_CODEX_MODEL
+        : DEFAULT_GATEWAY_MODEL;
   const providerDefaultFromKey =
     providerKey === "openai"
       ? modelDefaults.openai
+      : providerKey === "codex"
+        ? modelDefaults.codex
       : providerKey === "anthropic"
         ? modelDefaults.anthropic
         : providerKey === "local"
           ? modelDefaults.local
           : modelDefaults.gateway;
+  const requestedModel =
+    options?.model?.trim() ||
+    providerDefaultFromKey ||
+    (selectedProvider === "codex" ? modelDefaults.codex : modelDefaults.gateway) ||
+    fallbackDefault;
   const modelName =
-    options?.model?.trim() || providerDefaultFromKey || modelDefaults.gateway || fallbackDefault;
+    selectedProvider === "codex" && !CODEX_SUPPORTED_MODELS.has(requestedModel)
+      ? DEFAULT_CODEX_MODEL
+      : requestedModel;
 
-  if (selectedProvider === "openai") {
-    const openai = createOpenAI({ apiKey });
-    return openai(modelName);
+  if (selectedProvider === "codex") {
+    const codexSession = await resolveCodexSession(db);
+    if (!codexSession?.accessToken || !codexSession.accountId) return null;
+    const openai = createOpenAI({
+      apiKey: "chatgpt-oauth",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: {
+        Authorization: `Bearer ${codexSession.accessToken}`,
+        "chatgpt-account-id": codexSession.accountId,
+        "OpenAI-Beta": "responses=experimental",
+        originator: "codex_cli_rs",
+        accept: "text/event-stream"
+      }
+    });
+    return { model: openai(modelName), provider: "codex" };
   }
 
+  if (selectedProvider === "openai") {
+    const openAiKey = getOpenAiKey(db);
+    if (!openAiKey || !openAiKey.trim()) return null;
+    const openai = createOpenAI({ apiKey: openAiKey });
+    return { model: openai(modelName), provider: "openai" };
+  }
+
+  const apiKey = getApiKey(db);
+  if (!apiKey || !apiKey.trim()) return null;
   const gateway = createGateway({ apiKey });
-  return gateway(modelName);
+  return { model: gateway(modelName), provider: "gateway" };
 }
 
 export async function runAgentWithLLM(
@@ -446,11 +577,6 @@ export async function runAgentWithLLM(
   context: AgentContext,
   options?: ModelOptions
 ): Promise<AgentReply | null> {
-  const apiKey = getApiKey(context.db);
-  if (!apiKey || !apiKey.trim()) {
-    return null;
-  }
-
   try {
     const toolEvents: AgentToolEvent[] = [];
     const tools = buildAgentTools({
@@ -460,13 +586,24 @@ export async function runAgentWithLLM(
         context.onAgentToolEvent?.(event);
       }
     });
-    const model = createModel(context.db, apiKey, options);
+    const resolved = await createModel(context.db, options);
+    if (!resolved) return null;
+    const model = resolved.model;
+    const isCodex = resolved.provider === "codex";
     const systemPrompt = buildSystemPrompt(context.db);
 
     const result = streamText({
       model,
       system: systemPrompt,
       messages,
+      providerOptions: isCodex
+        ? {
+            openai: {
+              instructions: systemPrompt,
+              store: false
+            }
+          }
+        : undefined,
       tools,
       stopWhen: stepCountIs(10),
       abortSignal: undefined
@@ -479,7 +616,9 @@ export async function runAgentWithLLM(
 
     let fullText = text.trim();
     if (!fullText) {
-      const synthesized = await synthesizeSummaryWithLLM(model, toolEvents);
+      const synthesized = await synthesizeSummaryWithLLM(model, toolEvents, {
+        codex: isCodex
+      });
       fullText = synthesized || buildFallbackSummary(toolEvents);
     }
     return {
@@ -518,17 +657,18 @@ export async function streamAgentWithLLM(
   context: AgentContext,
   options?: ModelOptions
 ): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
-  const apiKey = getApiKey(context.db);
-  if (!apiKey || !apiKey.trim()) {
-    return {
-      ok: false,
-      error: "AI is not configured. Set API key in Settings to enable conversational responses."
-    };
-  }
-
   try {
     const tools = buildAgentTools(context);
-    const model = createModel(context.db, apiKey, options);
+    const resolved = await createModel(context.db, options);
+    if (!resolved) {
+      return {
+        ok: false,
+        error:
+          "AI is not configured. Set an API key or connect ChatGPT subscription in Settings."
+      };
+    }
+    const model = resolved.model;
+    const isCodex = resolved.provider === "codex";
     const systemPrompt = buildSystemPrompt(context.db);
 
     const normalized = normalizeUIMessages(messages);
@@ -538,6 +678,14 @@ export async function streamAgentWithLLM(
       model,
       system: systemPrompt,
       messages: modelMessages,
+      providerOptions: isCodex
+        ? {
+            openai: {
+              instructions: systemPrompt,
+              store: false
+            }
+          }
+        : undefined,
       tools,
       stopWhen: stepCountIs(10)
     });

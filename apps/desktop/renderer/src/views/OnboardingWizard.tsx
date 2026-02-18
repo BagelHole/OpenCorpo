@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 type OnboardingData = {
   completed: boolean;
-  aiProvider: "anthropic" | "openai" | "local";
+  aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
   gmailAccessToken: string;
   profile: {
@@ -32,6 +32,7 @@ type Props = {
   saveAiProvider?: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  getCodexOauthStart?: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
 };
 
 function normalizeProfile(
@@ -55,7 +56,8 @@ export function OnboardingWizard({
   saveProfile,
   saveAiProvider,
   checkAiKeyConfigured,
-  getGmailOauthStart
+  getGmailOauthStart,
+  getCodexOauthStart
 }: Props) {
   const [step, setStep] = useState(0);
   const [tokenInput, setTokenInput] = useState(onboarding.gmailAccessToken ?? "");
@@ -127,6 +129,28 @@ export function OnboardingWizard({
       setAiKeyConfigured(true);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Unable to save API key.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCodexConnect = async () => {
+    if (!getCodexOauthStart) return;
+    setSaving(true);
+    setLocalError(null);
+    try {
+      const response = await getCodexOauthStart();
+      if (!response.ok || !response.authUrl) {
+        setLocalError(response.error ?? "Unable to start Codex OAuth.");
+        return;
+      }
+      window.open(response.authUrl, "_blank", "noopener,noreferrer");
+      setLocalError("Finish sign-in in your browser tab, then refresh API key status.");
+      setTimeout(() => {
+        void checkAiKeyConfigured().then(setAiKeyConfigured);
+      }, 2500);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Codex OAuth start failed.");
     } finally {
       setSaving(false);
     }
@@ -257,6 +281,7 @@ export function OnboardingWizard({
               <div className="grid gap-3 sm:grid-cols-3">
                 {(
                   [
+                    ["codex", "Codex (ChatGPT) • Recommended"],
                     ["anthropic", "Anthropic"],
                     ["openai", "OpenAI"],
                     ["local", "Local / BYOK"]
@@ -281,33 +306,55 @@ export function OnboardingWizard({
           {step === 3 && (
             <div className="space-y-4 text-sm">
               <p className="text-[var(--oc-ink-muted)]">
-                Enter your API key for {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "your local/BYOK provider"}. You can change this later in settings.
+                {onboarding.aiProvider === "codex"
+                  ? "Connect your ChatGPT subscription account for Codex. You can change this later in settings."
+                  : `Enter your API key for ${
+                      onboarding.aiProvider === "anthropic"
+                        ? "Anthropic"
+                        : onboarding.aiProvider === "openai"
+                          ? "OpenAI"
+                          : "your local/BYOK provider"
+                    }. You can change this later in settings.`}
               </p>
               <div className="flex items-center gap-3">
-                <span>API key status:</span>
+                <span>{onboarding.aiProvider === "codex" ? "Connection status:" : "API key status:"}</span>
                 <Badge tone={aiKeyConfigured ? "success" : "warning"}>
                   {aiKeyConfigured ? "Configured" : "Not configured"}
                 </Badge>
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wider text-[var(--oc-ink-muted)]">
-                  API key
-                </label>
-                <input
-                  type="password"
-                  value={aiKeyInput}
-                  onChange={(event) => setAiKeyInput(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
-                  placeholder="Paste your API key"
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void handleSaveAiKey()} disabled={saving}>
-                  {saving ? "Saving..." : "Save key"}
-                </Button>
-              </div>
+              {onboarding.aiProvider === "codex" ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void handleCodexConnect()} disabled={saving}>
+                    {saving ? "Opening..." : "Connect ChatGPT"}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--oc-ink-muted)]">
+                      API key
+                    </label>
+                    <input
+                      type="password"
+                      value={aiKeyInput}
+                      onChange={(event) => setAiKeyInput(event.target.value)}
+                      className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
+                      placeholder="Paste your API key"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => void handleSaveAiKey()} disabled={saving}>
+                      {saving ? "Saving..." : "Save key"}
+                    </Button>
+                  </div>
+                </>
+              )}
               <p className="text-xs text-[var(--oc-ink-muted)]">
-                {onboarding.aiProvider === "local" ? "You can skip this step for local/BYOK setups." : "Required for AI-powered chat."}
+                {onboarding.aiProvider === "local"
+                  ? "You can skip this step for local/BYOK setups."
+                  : onboarding.aiProvider === "codex"
+                    ? "Required for Codex chat routing."
+                    : "Required for AI-powered chat."}
               </p>
             </div>
           )}
@@ -369,6 +416,7 @@ export function OnboardingWizard({
             </Button>
             {step < steps.length - 1 ? (
               <Button
+                disabled={step === 3 && onboarding.aiProvider === "codex" && !aiKeyConfigured}
                 onClick={() => {
                   if (step === 1) {
                     persistOnboarding({

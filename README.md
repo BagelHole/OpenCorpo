@@ -1,6 +1,6 @@
 # OpenCorpo
 
-OpenCorpo is a local-first, enterprise-ready business operating system powered by an AI agent that can read, act, schedule work, and safely reconfigure its own system.
+OpenCorpo is a local-first, business operating system powered by an AI agent that can read, act, schedule work, and safely reconfigure its own system.
 
 This is a chatbot and a self-configuring business OS with security and auditing.
 
@@ -107,7 +107,7 @@ Diagram:
 - Desktop: Electron (Vite + React + shadcn)
 - Database: SQLite + FTS5
 - Language: TypeScript everywhere
-- AI runtime: Vercel AI SDK (ai-sdk.dev) with pluggable providers (OpenAI, local models, BYOK)
+- AI runtime: Vercel AI SDK (ai-sdk.dev) with pluggable providers (OpenAI, Codex ChatGPT subscription OAuth, local models, BYOK)
 
 ## Control plane (first-class)
 
@@ -404,6 +404,10 @@ HTTP:
 - POST /connectors/gmail/token
 - GET /connectors/gmail/oauth/start
 - GET /oauth/google/callback
+- GET /connectors/codex/status
+- GET /connectors/codex/oauth/start
+- GET /oauth/openai/callback
+- POST /connectors/codex/disconnect
 
 WebSocket:
 
@@ -470,6 +474,12 @@ Optional AI provider key (Electron bridge):
 export AI_GATEWAY_API_KEY=your_key
 # or: export VERCEL_AI_API_KEY=your_key
 ```
+
+Codex ChatGPT subscription setup:
+
+- In Settings, choose `Codex (ChatGPT)` as AI provider.
+- Click `Connect ChatGPT`, complete OAuth in browser, then return to OpenCorpo.
+- This path uses ChatGPT subscription OAuth (personal/dev use), not OpenAI Platform API credits.
 
 ## License
 

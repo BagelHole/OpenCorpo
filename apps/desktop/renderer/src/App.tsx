@@ -191,6 +191,7 @@ export function App() {
           diagnostics={state.diagnostics}
           plugins={state.plugins}
           gmailStatus={state.gmailStatus}
+          codexStatus={state.codexStatus}
           onboarding={state.onboarding}
           profile={state.profile}
           aiModelDefaults={state.aiModelDefaults}
@@ -206,6 +207,8 @@ export function App() {
           onRunDiagnostics={state.runDiagnosticsNow}
           onRunRepair={state.runRepair}
           onGetOauthStart={state.getGmailOauthStart}
+          onGetCodexOauthStart={state.getCodexOauthStart}
+          onDisconnectCodex={state.disconnectCodex}
           onSaveGmailToken={state.saveGmailToken}
           onSaveAiKey={state.saveAiKey}
           checkAiKeyConfigured={state.checkAiKeyConfigured}
@@ -235,6 +238,7 @@ export function App() {
           saveAiProvider={state.saveAiProvider}
           checkAiKeyConfigured={state.checkAiKeyConfigured}
           getGmailOauthStart={state.getGmailOauthStart}
+          getCodexOauthStart={state.getCodexOauthStart}
         />
       </div>
     );

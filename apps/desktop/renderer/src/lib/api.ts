@@ -24,6 +24,13 @@ export type ScriptSecretItem = {
 };
 
 export type ScriptExecutionMode = "safe" | "trusted";
+export type CodexStatus = {
+  connected: boolean;
+  provider: string | null;
+  accountId: string | null;
+  expiresAt: string | null;
+  refreshConfigured: boolean;
+};
 
 export class OpenCorpoApi {
   constructor(
@@ -223,6 +230,20 @@ export class OpenCorpoApi {
     );
   }
 
+  async getCodexStatus() {
+    return this.get<CodexStatus>("/connectors/codex/status");
+  }
+
+  async getCodexOauthStart() {
+    return this.get<{ ok: boolean; authUrl?: string; error?: string }>(
+      "/connectors/codex/oauth/start"
+    );
+  }
+
+  async disconnectCodex() {
+    return this.post<{ ok: boolean }>("/connectors/codex/disconnect");
+  }
+
   // Secrets / AI
   async getAiKeyStatus() {
     return this.get<{ configured: boolean; provider: string | null }>(
@@ -262,7 +283,7 @@ export class OpenCorpoApi {
 
   async getAiModelDefaults() {
     return this.get<{
-      defaults: { anthropic: string; openai: string; local: string };
+      defaults: { anthropic: string; openai: string; local: string; codex: string };
     }>("/secrets/ai-model-defaults");
   }
 
@@ -270,10 +291,11 @@ export class OpenCorpoApi {
     anthropic: string;
     openai: string;
     local: string;
+    codex: string;
   }) {
     return this.post<{
       ok: boolean;
-      defaults: { anthropic: string; openai: string; local: string };
+      defaults: { anthropic: string; openai: string; local: string; codex: string };
     }>("/secrets/ai-model-defaults", defaults);
   }
 

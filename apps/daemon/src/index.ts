@@ -81,6 +81,14 @@ import {
   setScriptExecutionMode
 } from "./script-security";
 import { extractUserMemoryNotes } from "./user-memory";
+import {
+  CODEX_DEFAULT_REDIRECT_URI,
+  consumeCodexOauthVerifier,
+  createCodexOauthStart,
+  exchangeCodexAuthorizationCode,
+  extractCodexAccountId,
+  startCodexCallbackServer
+} from "./codex-auth";
 
 const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
@@ -110,6 +118,14 @@ if (existingAnthropicApiKey) {
 const existingAiProvider = getSecretValue(db, "ai.provider");
 if (existingAiProvider) {
   process.env.OPENCORPO_AI_PROVIDER = existingAiProvider.trim().toLowerCase();
+}
+const existingCodexAccessToken = getSecretValue(db, "ai.codex.access_token");
+if (existingCodexAccessToken) {
+  process.env.OPENCORPO_CODEX_ACCESS_TOKEN = existingCodexAccessToken.trim();
+}
+const existingCodexAccountId = getSecretValue(db, "ai.codex.account_id");
+if (existingCodexAccountId) {
+  process.env.OPENCORPO_CODEX_ACCOUNT_ID = existingCodexAccountId.trim();
 }
 
 const auth = getAuthState();
@@ -328,6 +344,7 @@ type AiModelDefaults = {
   anthropic: string;
   openai: string;
   local: string;
+  codex: string;
 };
 
 function readAiModelDefaults(): AiModelDefaults {
@@ -336,7 +353,8 @@ function readAiModelDefaults(): AiModelDefaults {
     return {
       anthropic: "",
       openai: "",
-      local: ""
+      local: "",
+      codex: ""
     };
   }
   try {
@@ -344,13 +362,15 @@ function readAiModelDefaults(): AiModelDefaults {
     return {
       anthropic: typeof parsed.anthropic === "string" ? parsed.anthropic.trim() : "",
       openai: typeof parsed.openai === "string" ? parsed.openai.trim() : "",
-      local: typeof parsed.local === "string" ? parsed.local.trim() : ""
+      local: typeof parsed.local === "string" ? parsed.local.trim() : "",
+      codex: typeof parsed.codex === "string" ? parsed.codex.trim() : ""
     };
   } catch {
     return {
       anthropic: "",
       openai: "",
-      local: ""
+      local: "",
+      codex: ""
     };
   }
 }
@@ -358,7 +378,13 @@ function readAiModelDefaults(): AiModelDefaults {
 function normalizeProviderName(value: string | null | undefined): string | null {
   const next = (value ?? "").trim().toLowerCase();
   if (!next) return null;
-  if (next === "openai" || next === "anthropic" || next === "local" || next === "gateway") {
+  if (
+    next === "openai" ||
+    next === "anthropic" ||
+    next === "local" ||
+    next === "gateway" ||
+    next === "codex"
+  ) {
     return next;
   }
   return null;
@@ -462,6 +488,35 @@ async function listAnthropicModels(apiKey: string): Promise<string[]> {
   }
 }
 
+const CODEX_MODELS = [
+  "gpt-5.2-codex",
+  "gpt-5.2",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1"
+];
+
+function getCodexTokenState() {
+  const accessToken =
+    (process.env.OPENCORPO_CODEX_ACCESS_TOKEN ??
+      getSecretValue(db, "ai.codex.access_token") ??
+      "").trim();
+  const refreshToken = (getSecretValue(db, "ai.codex.refresh_token") ?? "").trim();
+  const accountId =
+    (process.env.OPENCORPO_CODEX_ACCOUNT_ID ??
+      getSecretValue(db, "ai.codex.account_id") ??
+      "").trim();
+  const expiresAtRaw = (getSecretValue(db, "ai.codex.expires_at") ?? "").trim();
+  const expiresAt = expiresAtRaw ? new Date(expiresAtRaw).toISOString() : null;
+  return {
+    accessToken,
+    refreshToken,
+    accountId,
+    expiresAt: expiresAt && expiresAt !== "Invalid Date" ? expiresAt : null
+  };
+}
+
 function parseApprovalMetadata(raw: string | null) {
   if (!raw) return {};
   try {
@@ -489,7 +544,11 @@ function getScriptDbSessionFromRequest(request: Request) {
 }
 
 function isBypassPath(pathname: string) {
-  return pathname.startsWith("/oauth/google/callback") || pathname.startsWith("/script-db/");
+  return (
+    pathname.startsWith("/oauth/google/callback") ||
+    pathname.startsWith("/oauth/openai/callback") ||
+    pathname.startsWith("/script-db/")
+  );
 }
 
 async function exchangeGoogleCodeForToken(
@@ -549,6 +608,60 @@ async function exchangeGoogleCodeForToken(
   });
   writeEvent(db, { type: "connector.gmail.connected", data: { source: "oauth" } });
   return { ok: true };
+}
+
+async function completeCodexOauth(
+  code: string,
+  state: string,
+  redirectUri: string
+): Promise<{ ok: true; expiresAt: string } | { ok: false; error: string }> {
+  const verifier = consumeCodexOauthVerifier(state);
+  if (!verifier) {
+    return { ok: false, error: "invalid_or_expired_oauth_state" };
+  }
+  const exchanged = await exchangeCodexAuthorizationCode(code, verifier, redirectUri);
+  if (!exchanged.ok) {
+    return exchanged;
+  }
+  const accountId = extractCodexAccountId(exchanged.accessToken);
+  if (!accountId) {
+    return { ok: false, error: "codex_account_id_missing" };
+  }
+  const expiresAt = new Date(Date.now() + exchanged.expiresIn * 1000).toISOString();
+  setSecretRef(db, {
+    name: "ai.codex.access_token",
+    value: exchanged.accessToken,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.codex.refresh_token",
+    value: exchanged.refreshToken,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.codex.expires_at",
+    value: expiresAt,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.codex.account_id",
+    value: accountId,
+    provider: "openai_oauth_codex"
+  });
+  setSecretRef(db, {
+    name: "ai.provider",
+    value: "codex",
+    provider: "local_file"
+  });
+  process.env.OPENCORPO_AI_PROVIDER = "codex";
+  process.env.OPENCORPO_CODEX_ACCESS_TOKEN = exchanged.accessToken;
+  process.env.OPENCORPO_CODEX_ACCOUNT_ID = accountId;
+  writeAudit(db, { actor: "user", action: "codex_oauth_connected" });
+  writeEvent(db, {
+    type: "connector.codex.connected",
+    data: { provider: "openai_oauth_codex", expiresAt }
+  });
+  return { ok: true, expiresAt };
 }
 
 app.options("/*", ({ set }) => {
@@ -1627,6 +1740,92 @@ app.get("/oauth/google/callback", async ({ query, set }) => {
   };
 });
 
+app.get("/connectors/codex/status", () => {
+  const codex = getCodexTokenState();
+  return {
+    ok: true,
+    connected: Boolean(codex.accessToken && codex.accountId),
+    provider: codex.accessToken ? "openai_oauth_codex" : null,
+    accountId: codex.accountId || null,
+    expiresAt: codex.expiresAt,
+    refreshConfigured: Boolean(codex.refreshToken)
+  };
+});
+
+app.get("/connectors/codex/oauth/start", async ({ set }) => {
+  const redirectUri =
+    process.env.OPENCORPO_CODEX_REDIRECT_URI ??
+    CODEX_DEFAULT_REDIRECT_URI;
+  const started = createCodexOauthStart(redirectUri);
+  if (redirectUri === CODEX_DEFAULT_REDIRECT_URI) {
+    const callbackServer = await startCodexCallbackServer({
+      state: started.state,
+      onCallback: async ({ code, state }) => {
+        const completed = await completeCodexOauth(code, state, redirectUri);
+        return completed.ok ? { ok: true } : completed;
+      }
+    }).catch((err) => {
+      const code = (err as { code?: string } | null)?.code ?? "";
+      const suffix = code ? `:${code}` : "";
+      return { error: `codex_callback_server_start_failed${suffix}` };
+    });
+    if ("error" in callbackServer) {
+      set.status = 500;
+      return { ok: false, error: callbackServer.error };
+    }
+    if (callbackServer.redirectUri !== redirectUri) {
+      set.status = 500;
+      return { ok: false, error: "codex_callback_redirect_mismatch" };
+    }
+  }
+  return {
+    ok: true,
+    authUrl: started.authUrl,
+    redirectUri
+  };
+});
+
+app.get("/oauth/openai/callback", async ({ query, set }) => {
+  const code = typeof query?.code === "string" ? query.code.trim() : "";
+  const state = typeof query?.state === "string" ? query.state.trim() : "";
+  const redirectUri =
+    process.env.OPENCORPO_CODEX_REDIRECT_URI ??
+    `http://127.0.0.1:${daemonPort}/oauth/openai/callback`;
+  if (!code) {
+    set.status = 400;
+    return { ok: false, error: "missing_oauth_code" };
+  }
+  if (!state) {
+    set.status = 400;
+    return { ok: false, error: "missing_oauth_state" };
+  }
+  const result = await completeCodexOauth(code, state, redirectUri);
+  if (!result.ok) {
+    set.status = 400;
+    return result;
+  }
+  return {
+    ok: true,
+    message: "ChatGPT subscription connected. You can return to OpenCorpo."
+  };
+});
+
+app.post("/connectors/codex/disconnect", () => {
+  setSecretRef(db, { name: "ai.codex.access_token", value: "", provider: "local_file" });
+  setSecretRef(db, { name: "ai.codex.refresh_token", value: "", provider: "local_file" });
+  setSecretRef(db, { name: "ai.codex.expires_at", value: "", provider: "local_file" });
+  setSecretRef(db, { name: "ai.codex.account_id", value: "", provider: "local_file" });
+  if ((process.env.OPENCORPO_AI_PROVIDER ?? "").trim().toLowerCase() === "codex") {
+    setSecretRef(db, { name: "ai.provider", value: "local", provider: "local_file" });
+    process.env.OPENCORPO_AI_PROVIDER = "local";
+  }
+  process.env.OPENCORPO_CODEX_ACCESS_TOKEN = "";
+  process.env.OPENCORPO_CODEX_ACCOUNT_ID = "";
+  writeAudit(db, { actor: "user", action: "codex_oauth_disconnected" });
+  writeEvent(db, { type: "connector.codex.disconnected", data: {} });
+  return { ok: true };
+});
+
 app.get("/secrets", ({ query }) => {
   const limit = query?.limit ? Number(query.limit) : 100;
   return {
@@ -1717,6 +1916,7 @@ app.post("/settings/script-execution-mode", ({ body }) => {
 });
 
 app.get("/secrets/ai-key/status", () => {
+  const codex = getCodexTokenState();
   const hasKey = Boolean(
     process.env.AI_GATEWAY_API_KEY ??
       process.env.OPENAI_API_KEY ??
@@ -1725,7 +1925,8 @@ app.get("/secrets/ai-key/status", () => {
       getSecretValue(db, "ai.api_key") ??
       getSecretValue(db, "ai.api_key.openai") ??
       getSecretValue(db, "ai.api_key.anthropic") ??
-      getSecretValue(db, "ai.api_key.gateway")
+      getSecretValue(db, "ai.api_key.gateway") ??
+      (codex.accessToken && codex.accountId ? "codex" : "")
   );
   const provider =
     process.env.OPENCORPO_AI_PROVIDER ??
@@ -1748,6 +1949,8 @@ app.get("/secrets/ai/providers", async () => {
   const openAiKey = getProviderApiKey("openai", preferredProvider, legacyKey).trim();
   const anthropicKey = getProviderApiKey("anthropic", preferredProvider, legacyKey).trim();
   const gatewayKey = getProviderApiKey("gateway", preferredProvider, legacyKey).trim();
+  const codex = getCodexTokenState();
+  const codexConfigured = Boolean(codex.accessToken && codex.accountId);
 
   const [openAiModels, anthropicModels] = await Promise.all([
     openAiKey ? listOpenAiModels(openAiKey) : Promise.resolve([]),
@@ -1784,6 +1987,13 @@ app.get("/secrets/ai/providers", async () => {
       )
     },
     {
+      id: "codex",
+      label: "Codex (ChatGPT Subscription)",
+      configured: codexConfigured,
+      defaultModel: defaults.codex,
+      models: dedupeModels(CODEX_MODELS, defaults.codex)
+    },
+    {
       id: "gateway",
       label: "Gateway",
       configured: Boolean(gatewayKey),
@@ -1808,6 +2018,8 @@ app.get("/secrets/ai/providers", async () => {
         provider.models[0] ||
         (provider.id === "openai"
           ? "gpt-5.2-chat-latest"
+          : provider.id === "codex"
+            ? "gpt-5.2-codex"
           : provider.id === "local"
             ? "anthropic/claude-sonnet-4.5"
             : ""),
@@ -1879,7 +2091,8 @@ app.post("/secrets/ai-model-defaults", ({ body }) => {
   const defaults = {
     anthropic: typeof payload.anthropic === "string" ? payload.anthropic.trim() : "",
     openai: typeof payload.openai === "string" ? payload.openai.trim() : "",
-    local: typeof payload.local === "string" ? payload.local.trim() : ""
+    local: typeof payload.local === "string" ? payload.local.trim() : "",
+    codex: typeof payload.codex === "string" ? payload.codex.trim() : ""
   };
   setSecretRef(db, {
     name: "ai.model_defaults",
@@ -1922,7 +2135,7 @@ app.post("/secrets/ai-provider", ({ body }) => {
   const payload = asObject(body);
   const provider = typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
   if (!provider) return { ok: false, error: "provider_required" };
-  const valid = ["openai", "anthropic", "local", "gateway"];
+  const valid = ["openai", "anthropic", "local", "gateway", "codex"];
   if (!valid.includes(provider)) return { ok: false, error: "invalid_provider" };
   setSecretRef(db, { name: "ai.provider", value: provider, provider: "local_file" });
   process.env.OPENCORPO_AI_PROVIDER = provider;

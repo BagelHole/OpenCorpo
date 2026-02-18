@@ -45,7 +45,7 @@ type ScriptExecutionMode = "safe" | "trusted";
 
 type OnboardingData = {
   completed: boolean;
-  aiProvider: "anthropic" | "openai" | "local";
+  aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
   gmailAccessToken: string;
   profile: {
@@ -54,6 +54,14 @@ type OnboardingData = {
     jobTitle: string;
     about: string;
   };
+};
+
+type CodexStatus = {
+  connected: boolean;
+  provider: string | null;
+  accountId: string | null;
+  expiresAt: string | null;
+  refreshConfigured: boolean;
 };
 
 function normalizeProfile(profile: {
@@ -74,11 +82,13 @@ function normalizeModelDefaults(defaults: {
   anthropic?: string;
   openai?: string;
   local?: string;
+  codex?: string;
 } | null | undefined) {
   return {
     anthropic: defaults?.anthropic ?? "",
     openai: defaults?.openai ?? "",
-    local: defaults?.local ?? ""
+    local: defaults?.local ?? "",
+    codex: defaults?.codex ?? ""
   };
 }
 
@@ -87,6 +97,7 @@ export function SettingsView({
   diagnostics,
   plugins,
   gmailStatus,
+  codexStatus,
   onboarding,
   profile,
   aiModelDefaults,
@@ -102,6 +113,8 @@ export function SettingsView({
   onRunDiagnostics,
   onRunRepair,
   onGetOauthStart,
+  onGetCodexOauthStart,
+  onDisconnectCodex,
   onSaveGmailToken,
   onSaveAiKey,
   checkAiKeyConfigured,
@@ -113,6 +126,7 @@ export function SettingsView({
   diagnostics: DiagnosticsReport | null;
   plugins: PluginInfo[];
   gmailStatus: GmailStatus;
+  codexStatus: CodexStatus;
   onboarding: OnboardingData;
   profile: {
     name: string;
@@ -124,6 +138,7 @@ export function SettingsView({
     anthropic: string;
     openai: string;
     local: string;
+    codex: string;
   };
   scriptSecrets: ScriptSecretItem[];
   scriptExecutionMode: ScriptExecutionMode;
@@ -138,6 +153,7 @@ export function SettingsView({
     anthropic: string;
     openai: string;
     local: string;
+    codex: string;
   }) => Promise<void>;
   onSaveScriptSecret: (input: {
     name: string;
@@ -150,6 +166,8 @@ export function SettingsView({
   onRunDiagnostics: () => Promise<void>;
   onRunRepair: () => Promise<void>;
   onGetOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  onGetCodexOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  onDisconnectCodex: () => Promise<void>;
   onSaveGmailToken: (token: string) => Promise<void>;
   onSaveAiKey: (key: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
@@ -219,6 +237,25 @@ export function SettingsView({
     }
     window.open(start.authUrl, "_blank", "noopener,noreferrer");
     setLocalMessage("Complete sign-in in your browser, then run diagnostics here.");
+  };
+
+  const connectCodexOAuth = async () => {
+    const start = await onGetCodexOauthStart();
+    if (!start.ok || !start.authUrl) {
+      setAiKeyMessage(start.error ?? "Failed to start Codex OAuth.");
+      return;
+    }
+    window.open(start.authUrl, "_blank", "noopener,noreferrer");
+    setAiKeyMessage("Complete ChatGPT sign-in in your browser, then reopen this page.");
+  };
+
+  const disconnectCodex = async () => {
+    try {
+      await onDisconnectCodex();
+      setAiKeyMessage("Codex subscription disconnected.");
+    } catch (error) {
+      setAiKeyMessage(error instanceof Error ? error.message : "Failed to disconnect Codex.");
+    }
   };
 
   const saveToken = async () => {
@@ -345,11 +382,17 @@ export function SettingsView({
           <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
             <span className="text-[var(--oc-ink-muted)]">Provider</span>
             <span className="text-xs">
-              {onboarding.aiProvider === "anthropic" ? "Anthropic" : onboarding.aiProvider === "openai" ? "OpenAI" : "Local / BYOK"}
+              {onboarding.aiProvider === "anthropic"
+                ? "Anthropic"
+                : onboarding.aiProvider === "openai"
+                  ? "OpenAI"
+                  : onboarding.aiProvider === "codex"
+                    ? "Codex (ChatGPT)"
+                    : "Local / BYOK"}
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {(["anthropic", "openai", "local"] as const).map((value) => (
+            {(["anthropic", "openai", "local", "codex"] as const).map((value) => (
               <button
                 key={value}
                 onClick={() => void handleProviderChange(value)}
@@ -359,7 +402,13 @@ export function SettingsView({
                     : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink)] hover:border-[var(--oc-border-strong)]"
                 }`}
               >
-                {value === "anthropic" ? "Anthropic" : value === "openai" ? "OpenAI" : "Local"}
+                {value === "anthropic"
+                  ? "Anthropic"
+                  : value === "openai"
+                    ? "OpenAI"
+                    : value === "codex"
+                      ? "Codex"
+                      : "Local"}
               </button>
             ))}
           </div>
@@ -370,16 +419,37 @@ export function SettingsView({
             </Badge>
           </div>
           <div className="space-y-2">
-            <input
-              type="password"
-              value={aiKeyInput}
-              onChange={(e) => setAiKeyInput(e.target.value)}
-              className={editableFieldClass}
-              placeholder="Paste API key"
-            />
-            <Button size="sm" onClick={() => void saveAiKey()}>
-              Save API key
-            </Button>
+            {onboarding.aiProvider === "codex" ? (
+              <>
+                <div className="rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+                  Codex status: {codexStatus.connected ? "Connected" : "Not connected"}
+                  {codexStatus.accountId ? ` • Account: ${codexStatus.accountId}` : ""}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => void connectCodexOAuth()}>
+                    {codexStatus.connected ? "Reconnect ChatGPT" : "Connect ChatGPT"}
+                  </Button>
+                  {codexStatus.connected && (
+                    <Button size="sm" variant="secondary" onClick={() => void disconnectCodex()}>
+                      Disconnect Codex
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <input
+                  type="password"
+                  value={aiKeyInput}
+                  onChange={(e) => setAiKeyInput(e.target.value)}
+                  className={editableFieldClass}
+                  placeholder="Paste API key"
+                />
+                <Button size="sm" onClick={() => void saveAiKey()}>
+                  Save API key
+                </Button>
+              </>
+            )}
           </div>
           {aiKeyMessage && (
             <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
@@ -420,6 +490,14 @@ export function SettingsView({
             }
             className={editableFieldClass}
             placeholder="Local/BYOK default model"
+          />
+          <input
+            value={modelDefaultsInput.codex}
+            onChange={(event) =>
+              setModelDefaultsInput((current) => ({ ...current, codex: event.target.value }))
+            }
+            className={editableFieldClass}
+            placeholder="Codex default model (e.g. gpt-5.2-codex)"
           />
           <Button size="sm" onClick={() => void saveModelDefaults()}>
             Save model defaults

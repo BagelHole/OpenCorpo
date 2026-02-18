@@ -19,13 +19,14 @@ import type {
   PluginInfo,
   ToolInfo,
   DiagnosticsReport,
+  CodexStatus,
   UiConfig,
 } from "@/lib/api";
 import { OpenCorpoApi } from "@/lib/api";
 
 export type OnboardingData = {
   completed: boolean;
-  aiProvider: "anthropic" | "openai" | "local";
+  aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
   gmailAccessToken: string;
   profile: UserProfile;
@@ -42,13 +43,14 @@ export type AiModelDefaults = {
   anthropic: string;
   openai: string;
   local: string;
+  codex: string;
 };
 
 export type ChatSessionMetadata = {
   emoji?: string;
   color?: string;
   order?: number;
-  provider?: "anthropic" | "openai" | "local";
+  provider?: "anthropic" | "openai" | "local" | "codex";
   model?: string;
 };
 
@@ -90,6 +92,8 @@ export type GmailStatus = {
   refreshConfigured: boolean;
 };
 
+export type CodexConnectionStatus = CodexStatus;
+
 const EMPTY_AI_PROVIDER_CATALOG: AiProviderCatalog = {
   defaultProvider: null,
   providers: [],
@@ -100,6 +104,7 @@ const ACTIVE_CHAT_SESSION_KEY = "opencorpo_active_chat_session";
 const CHAT_SESSIONS_CACHE_KEY = "opencorpo_chat_sessions_cache_v1";
 const CHAT_MESSAGES_CACHE_KEY = "opencorpo_chat_messages_cache_v1";
 const UI_CONFIG_CACHE_KEY = "opencorpo_ui_config_cache_v1";
+const LAST_CHAT_SELECTION_KEY = "opencorpo_last_chat_selection_v1";
 
 const DEFAULT_UI_CONFIG: UiConfig = {
   name: "fallback",
@@ -200,7 +205,10 @@ function readChatSessionsCache(): ChatSessionRecord[] {
             : {};
         const providerRaw = metadataRaw.provider;
         const provider =
-          providerRaw === "anthropic" || providerRaw === "openai" || providerRaw === "local"
+          providerRaw === "anthropic" ||
+          providerRaw === "openai" ||
+          providerRaw === "local" ||
+          providerRaw === "codex"
             ? providerRaw
             : undefined;
         const orderRaw = metadataRaw.order;
@@ -355,7 +363,7 @@ function readOnboarding(): OnboardingData {
     if (!raw) {
       return {
         completed: false,
-        aiProvider: "anthropic",
+        aiProvider: "codex",
         aiKey: "",
         gmailAccessToken: "",
         profile: {
@@ -370,9 +378,11 @@ function readOnboarding(): OnboardingData {
     return {
       completed: Boolean(parsed.completed),
       aiProvider:
-        parsed.aiProvider === "openai" || parsed.aiProvider === "local"
+        parsed.aiProvider === "openai" ||
+        parsed.aiProvider === "local" ||
+        parsed.aiProvider === "codex"
           ? parsed.aiProvider
-          : "anthropic",
+          : "codex",
       aiKey: parsed.aiKey ?? "",
       gmailAccessToken: parsed.gmailAccessToken ?? "",
       profile: {
@@ -385,7 +395,7 @@ function readOnboarding(): OnboardingData {
   } catch {
     return {
       completed: false,
-      aiProvider: "anthropic",
+      aiProvider: "codex",
       aiKey: "",
       gmailAccessToken: "",
       profile: {
@@ -416,6 +426,7 @@ type OpenCorpoContextValue = {
   scriptSecrets: ScriptSecretItem[];
   scriptExecutionMode: ScriptExecutionMode;
   gmailStatus: GmailStatus;
+  codexStatus: CodexConnectionStatus;
   aiProviderCatalog: AiProviderCatalog;
   uiConfig: UiConfig;
   pendingApprovals: Approval[];
@@ -459,6 +470,8 @@ type OpenCorpoContextValue = {
   saveAiProvider: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
   getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  getCodexOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
+  disconnectCodex: () => Promise<void>;
   updateApproval: (id: number, action: "approve" | "deny") => Promise<void>;
   runJob: (id: number) => Promise<void>;
   toggleJob: (id: number, enabled: boolean) => Promise<void>;
@@ -500,6 +513,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     anthropic: "",
     openai: "",
     local: "",
+    codex: "",
   });
   const [scriptSecrets, setScriptSecrets] = useState<ScriptSecretItem[]>([]);
   const [scriptExecutionMode, setScriptExecutionMode] = useState<ScriptExecutionMode>("safe");
@@ -507,6 +521,13 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     connected: false,
     tokenSource: null,
     refreshConfigured: false,
+  });
+  const [codexStatus, setCodexStatus] = useState<CodexConnectionStatus>({
+    connected: false,
+    provider: null,
+    accountId: null,
+    expiresAt: null,
+    refreshConfigured: false
   });
   const [aiProviderCatalog, setAiProviderCatalog] = useState<AiProviderCatalog>(
     EMPTY_AI_PROVIDER_CATALOG
@@ -582,7 +603,10 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     const providerRaw =
       typeof metadata.provider === "string" ? metadata.provider : undefined;
     const provider =
-      providerRaw === "anthropic" || providerRaw === "openai" || providerRaw === "local"
+      providerRaw === "anthropic" ||
+      providerRaw === "openai" ||
+      providerRaw === "local" ||
+      providerRaw === "codex"
         ? providerRaw
         : undefined;
     const orderRaw = metadata.order;
@@ -665,7 +689,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     const currentApi = apiRef.current;
     if (!currentApi || !daemonStatus.ready) return;
     try {
-      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, gmailRes, uiRes] =
+      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, gmailRes, codexRes, uiRes] =
         await Promise.all([
           currentApi.listApprovals(),
           currentApi.listJobs(),
@@ -674,6 +698,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           currentApi.listPlugins(),
           currentApi.listTools(),
           currentApi.getGmailStatus(),
+          currentApi.getCodexStatus(),
           currentApi.getUiConfig(),
         ]);
 
@@ -688,6 +713,15 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           connected: gmailRes.data.connected,
           tokenSource: gmailRes.data.tokenSource,
           refreshConfigured: gmailRes.data.refreshConfigured,
+        });
+      }
+      if (codexRes.ok) {
+        setCodexStatus({
+          connected: codexRes.data.connected,
+          provider: codexRes.data.provider,
+          accountId: codexRes.data.accountId,
+          expiresAt: codexRes.data.expiresAt,
+          refreshConfigured: codexRes.data.refreshConfigured
         });
       }
       if (uiRes.ok && isValidUiConfig(uiRes.data.config)) {
@@ -853,6 +887,11 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
         if (fallbackSessionId !== null) {
           await selectChatSession(fallbackSessionId);
         } else {
+          if (!currentApi) {
+            setActiveChatSessionId(null);
+            persistActiveSession(null);
+            return;
+          }
           const created = await currentApi.createChatSession("New conversation", {
             emoji: "💬",
             color: "slate",
@@ -1057,8 +1096,36 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       if (!res.ok) throw new Error(res.error);
       const providerRes = await api.getAiProviderCatalog();
       if (providerRes.ok) setAiProviderCatalog(providerRes.data);
+      const normalizedProvider =
+        provider === "anthropic" ||
+        provider === "openai" ||
+        provider === "local" ||
+        provider === "codex"
+          ? provider
+          : null;
+      if (!normalizedProvider) return;
+      try {
+        localStorage.setItem(
+          LAST_CHAT_SELECTION_KEY,
+          JSON.stringify({ provider: normalizedProvider })
+        );
+      } catch {
+        // ignore storage write errors
+      }
+      const activeId = activeChatSessionIdRef.current;
+      if (!activeId) return;
+      const currentSession = chatSessions.find((session) => session.id === activeId);
+      if (!currentSession) return;
+      await updateChatSession(activeId, {
+        title: currentSession.title,
+        metadata: {
+          ...currentSession.metadata,
+          provider: normalizedProvider,
+          model: undefined
+        }
+      });
     },
-    [api]
+    [api, chatSessions, updateChatSession]
   );
 
   const saveProfile = useCallback(
@@ -1122,6 +1189,32 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     if (!api) return { ok: false, error: "API client is not ready yet. Please try again." };
     const res = await api.getGmailOauthStart();
     return res.ok ? res.data : { ok: false, error: res.error };
+  }, [api]);
+
+  const getCodexOauthStart = useCallback(async () => {
+    if (!api) return { ok: false, error: "API client is not ready yet. Please try again." };
+    const res = await api.getCodexOauthStart();
+    return res.ok ? res.data : { ok: false, error: res.error };
+  }, [api]);
+
+  const disconnectCodex = useCallback(async () => {
+    if (!api) throw new Error("API client is not ready yet. Please try again.");
+    const res = await api.disconnectCodex();
+    if (!res.ok) throw new Error(res.error);
+    const [providerRes, codexRes] = await Promise.all([
+      api.getAiProviderCatalog(),
+      api.getCodexStatus()
+    ]);
+    if (providerRes.ok) setAiProviderCatalog(providerRes.data);
+    if (codexRes.ok) {
+      setCodexStatus({
+        connected: codexRes.data.connected,
+        provider: codexRes.data.provider,
+        accountId: codexRes.data.accountId,
+        expiresAt: codexRes.data.expiresAt,
+        refreshConfigured: codexRes.data.refreshConfigured
+      });
+    }
   }, [api]);
 
   const updateApproval = useCallback(
@@ -1227,6 +1320,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       scriptSecrets,
       scriptExecutionMode,
       gmailStatus,
+      codexStatus,
       aiProviderCatalog,
       uiConfig,
       pendingApprovals,
@@ -1256,6 +1350,8 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveAiProvider,
       checkAiKeyConfigured,
       getGmailOauthStart,
+      getCodexOauthStart,
+      disconnectCodex,
       updateApproval,
       runJob,
       toggleJob,
@@ -1281,6 +1377,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       scriptSecrets,
       scriptExecutionMode,
       gmailStatus,
+      codexStatus,
       aiProviderCatalog,
       uiConfig,
       pendingApprovals,
@@ -1310,6 +1407,8 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveAiProvider,
       checkAiKeyConfigured,
       getGmailOauthStart,
+      getCodexOauthStart,
+      disconnectCodex,
       updateApproval,
       runJob,
       toggleJob,

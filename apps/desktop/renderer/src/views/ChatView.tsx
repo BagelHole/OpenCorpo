@@ -60,12 +60,17 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function parseProvider(value: string): "anthropic" | "openai" | "local" | undefined {
-  if (value === "anthropic" || value === "openai" || value === "local") return value;
+function parseProvider(value: string): "anthropic" | "openai" | "local" | "codex" | undefined {
+  if (value === "anthropic" || value === "openai" || value === "local" || value === "codex") {
+    return value;
+  }
   return undefined;
 }
 
-function readLastChatSelection(): { provider?: "anthropic" | "openai" | "local"; model?: string } {
+function readLastChatSelection(): {
+  provider?: "anthropic" | "openai" | "local" | "codex";
+  model?: string;
+} {
   try {
     const raw = localStorage.getItem(LAST_CHAT_SELECTION_KEY);
     if (!raw) return {};
@@ -80,7 +85,7 @@ function readLastChatSelection(): { provider?: "anthropic" | "openai" | "local";
 }
 
 function writeLastChatSelection(input: {
-  provider?: "anthropic" | "openai" | "local";
+  provider?: "anthropic" | "openai" | "local" | "codex";
   model?: string;
 }) {
   try {
@@ -155,7 +160,10 @@ export function ChatView() {
     () =>
       state.aiProviderCatalog.providers.filter(
         (provider) =>
-          provider.id === "anthropic" || provider.id === "openai" || provider.id === "local"
+          provider.id === "anthropic" ||
+          provider.id === "openai" ||
+          provider.id === "local" ||
+          provider.id === "codex"
       ),
     [state.aiProviderCatalog.providers]
   );
