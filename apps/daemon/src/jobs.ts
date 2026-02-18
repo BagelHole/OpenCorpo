@@ -253,8 +253,105 @@ export function summarizeSchedule(schedule: Record<string, unknown> | null) {
   }
   const cron = typeof schedule.cron === "string" ? schedule.cron : null;
   const timezone = typeof schedule.timezone === "string" ? schedule.timezone : "local";
-  if (cron) return `cron ${cron} (${timezone})`;
+  if (cron) return summarizeCron(cron, timezone);
   return "unscheduled";
+}
+
+function summarizeCron(cron: string, timezone: string) {
+  const tokens = cron.trim().split(/\s+/);
+  if (tokens.length !== 5) return `cron ${cron} (${timezone})`;
+  const [minField, hourField, dayField, monthField, dowField] = tokens;
+  const tzLabel = timezoneLabel(timezone);
+
+  if (minField === "*" && hourField === "*" && dayField === "*" && monthField === "*" && dowField === "*") {
+    return `every minute (${tzLabel})`;
+  }
+
+  const minuteStep = parseStep(minField);
+  if (minuteStep !== null && hourField === "*" && dayField === "*" && monthField === "*" && dowField === "*") {
+    return `every ${minuteStep} minute${minuteStep === 1 ? "" : "s"} (${tzLabel})`;
+  }
+
+  const minute = parseFixed(minField, 0, 59);
+  const hour = parseFixed(hourField, 0, 23);
+  const hourStep = parseStep(hourField);
+
+  if (minute !== null && hourField === "*" && dayField === "*" && monthField === "*" && dowField === "*") {
+    return `every hour ${formatHourlyAnchor(minute)} (${tzLabel})`;
+  }
+
+  if (minute !== null && hourStep !== null && dayField === "*" && monthField === "*" && dowField === "*") {
+    return `every ${hourStep} hour${hourStep === 1 ? "" : "s"} ${formatHourlyAnchor(minute)} (${tzLabel})`;
+  }
+
+  if (minute !== null && hour !== null && dayField === "*" && monthField === "*" && dowField === "*") {
+    return `every day at ${formatTime(hour, minute)} (${tzLabel})`;
+  }
+
+  const dowList = parseDowList(dowField);
+  if (
+    minute !== null &&
+    hour !== null &&
+    dayField === "*" &&
+    monthField === "*" &&
+    dowList !== null &&
+    dowList.length > 0
+  ) {
+    return `every ${dowList.map(formatDow).join(", ")} at ${formatTime(hour, minute)} (${tzLabel})`;
+  }
+
+  return `cron ${cron} (${timezone})`;
+}
+
+function timezoneLabel(timezone: string) {
+  return timezone.toLowerCase() === "local" ? "local time" : timezone;
+}
+
+function parseFixed(field: string, min: number, max: number) {
+  if (!/^\d+$/.test(field)) return null;
+  const value = Number(field);
+  if (!Number.isFinite(value) || value < min || value > max) return null;
+  return value;
+}
+
+function parseStep(field: string) {
+  if (!field.startsWith("*/")) return null;
+  const value = Number(field.slice(2));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+function parseDowList(field: string) {
+  if (field === "*") return [0, 1, 2, 3, 4, 5, 6];
+  const tokens = field.split(",");
+  const days: number[] = [];
+  for (const token of tokens) {
+    if (!/^\d+$/.test(token)) return null;
+    const raw = Number(token);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 7) return null;
+    days.push(raw === 7 ? 0 : raw);
+  }
+  return [...new Set(days)].sort((a, b) => a - b);
+}
+
+function formatDow(value: number) {
+  const names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return names[value] ?? `day ${value}`;
+}
+
+function formatMinute(minute: number) {
+  return `:${String(minute).padStart(2, "0")}`;
+}
+
+function formatHourlyAnchor(minute: number) {
+  if (minute === 0) return "on the hour";
+  return `at ${formatMinute(minute)}`;
+}
+
+function formatTime(hour24: number, minute: number) {
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
 }
 
 export function setJobEnabled(db: DbHandle, id: number, enabled: boolean) {
