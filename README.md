@@ -1,476 +1,218 @@
-# OpenCorpo
-
-OpenCorpo is a local-first, business operating system powered by an AI agent that can read, act, schedule work, and safely reconfigure its own system.
-
-This is a chatbot and a self-configuring business OS with security and auditing.
-
-## Early Beta Warning
-
-OpenCorpo is in **very early beta**.
-
-What this means right now:
-
-- breaking changes are expected
-- schemas, APIs, and config formats can change without notice
-- features may be incomplete or unstable
-- documentation may lag behind the latest code
-- data migrations may be imperfect between versions
-
-If you use OpenCorpo today, treat it as an experimental system and avoid relying on it for production-critical workflows.
-
-## Open Source Project Notes
-
-OpenCorpo is open source and community contributions are welcome.
-
-- use Issues for bugs, regressions, and feature proposals
-- use PRs for focused changes with clear scope
-- prefer small, reviewable patches over large refactors
-- expect maintainers to prioritize safety, auditability, and local-first behavior over feature speed
-
-## Core vision
-
-Let the AI work on the system without making the system dangerous.
-
-OpenCorpo is built so that:
-
-- 80-95% of customization happens via declarative config
-- AI edits validated JSON, not code
-- all changes are previewed, policy-checked, and audited
-- code edits are rare, explicit, gated, and reviewed
-- every action is explainable after the fact
-
-## Non-negotiable principles
-
-- Local-first
-  - SQLite on disk
-  - offline capable
-  - no required cloud backend
-- Agent can act
-  - AI can edit data, send messages, and run jobs
-  - only via registered tools
-  - no implicit DB or network access
-- Declarative-first
-  - tools, policies, workflows, jobs, schemas, UI are config
-  - AI edits config by default
-- Enterprise-grade security
-  - capability-based permissions
-  - policy enforcement + approvals
-  - immutable audit log
-  - encrypted secrets
-- No slop
-  - schemas everywhere
-  - explicit risk levels
-  - deterministic tooling
-  - aggressive defaults
+<div align="center">
+  <img src="./OpenCorpo.png" alt="OpenCorpo" width="220" />
 
-## High-level architecture
+  # OpenCorpo
 
-OpenCorpo consists of two local processes:
+  **Self-editing, local-first business operating system powered by an AI operator.**
 
-1) Desktop app (Electron + React UI)
-   - chat, jobs, CRM, approvals, audit viewer
-   - OAuth flows (Codex)
-   - system tray + lifecycle
-   - starts and authenticates the daemon
+  <p>
+    <a href="#quick-start">Quick Start</a> •
+    <a href="#installation">Installation</a> •
+    <a href="#architecture">Architecture</a> •
+    <a href="#security-model">Security</a> •
+    <a href="#roadmap">Roadmap</a>
+  </p>
 
-2) Local daemon (Bun + Elysia)
-   - binds to 127.0.0.1
-   - owns all data, tools, jobs, policies, and plugins
-   - hosts the AI runtime
-   - enforces security, approvals, auditing
+  <p>
+    <img alt="Status" src="https://img.shields.io/badge/status-early%20beta-ffb020" />
+    <img alt="Runtime" src="https://img.shields.io/badge/runtime-Bun%20%2B%20Node-111827" />
+    <img alt="Desktop" src="https://img.shields.io/badge/desktop-Electron%20%2B%20React-2563eb" />
+    <img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a" />
+  </p>
+</div>
 
-Diagram:
-
-+---------------------------+
-|        Desktop UI         |  Electron
-|  - chat / jobs / crm      |
-|  - jobs / approvals       |
-|  - audit viewer           |
-|  - oauth                  |
-+------------+--------------+
-             | localhost (HTTP + WS)
-             | per-launch auth token
-+------------v--------------+
-|        Bun Daemon         |  Elysia
-|  - sqlite                 |
-|  - agent runtime          |
-|  - tool + job registry    |
-|  - control plane          |
-|  - policy engine          |
-|  - audit log              |
-+---------------------------+
-
-## Tech stack
-
-- Runtime: Bun
-- API: Elysia
-- Desktop: Electron (Vite + React + shadcn)
-- Database: SQLite + FTS5
-- Language: TypeScript everywhere
-- AI runtime: Vercel AI SDK (ai-sdk.dev) with pluggable providers (OpenAI, Codex ChatGPT subscription OAuth, local models, BYOK)
-
-## Control plane (first-class)
-
-The Control Plane is a declarative layer that defines how OpenCorpo behaves. It exists so the AI can safely modify the system without touching executable code.
-
-Governed by the Control Plane:
-
-- tool definitions and risk
-- policies and approvals
-- workflows / automations
-- jobs and schedules
-- data schemas and fields
-- UI composition
-- audit redaction rules
-
-All Control Plane files are:
-
-- JSON
-- strictly schema-validated
-- diffable
-- previewable
-- audited on change
-
-## Tiered customization model
-
-### Tier A - declarative (default)
+---
 
-AI is allowed to edit:
+## What OpenCorpo Is
 
-- config/**/*.json
-- tools, policies, workflows, jobs, schemas, UI layouts
+OpenCorpo is a desktop-first, local AI operating system for business workflows.
 
-Desktop navigation and base pages are now declarative in `config/ui/desktop.json` and validated by `config/schemas/ui.schema.json`.
-The AI can add sidebar items, interactive action buttons, and sandboxed npm React widgets there without code changes.
-App-level theming is also declarative there via a top-level `theme` object (`light`/`dark` tokens for colors, radii, shadows, and fonts).
+It combines:
+- an Electron desktop app for chat, approvals, audits, and operations
+- a local Bun daemon for tools, jobs, policies, and agent runtime
+- a declarative control plane the AI can edit safely
 
-In desktop runtime, mutable user-specific Control Plane state is stored under the runtime data directory (`data/config` in local dev, app runtime folder in packaged builds). Do not commit those runtime JSON changes.
+The design goal is simple: **let AI act without making your system dangerous**.
 
-Flow:
+## Self-Editing
 
-- propose change
-- validate
-- preview
-- apply
-- audit
+OpenCorpo is not just a chatbot. It can **edit and evolve its own product surface** through a validated control plane.
 
-### Tier B - code (rare)
+Out of the box, the AI can:
+- add/edit sidebar routes and pages in `ui/desktop.json`
+- compose new pages with markdown, notes, stats, and job-driven tables
+- embed live web experiences with `web_embed` (iframe-backed blocks)
+- add npm-powered `react_widget` components to pages
+- spin up `terminal_widget` blocks for interactive command output
+- propose config/code changes with previews, approvals, and audit trails
 
-When config is insufficient:
+## Why It Exists
 
-- AI proposes a patch
-- tests and checks run
-- user explicitly approves
-- patch applied to userland/workspace
+Most AI products stop at chat. OpenCorpo is built for execution:
+- plan and run work
+- schedule recurring jobs
+- reconfigure workflows through validated JSON
+- keep every important action auditable
 
-Goal: Tier B < 10% of changes.
+## Inspired By OpenClaw
 
-## AI self-editing pipeline
+OpenCorpo is inspired by the direction and momentum of [OpenClaw](https://github.com/openclaw/openclaw), especially around practical local-first agent workflows and strong docs ergonomics.
 
-When the AI modifies OpenCorpo itself:
+If you like this project, you should absolutely check OpenClaw out too.
 
-- Change proposal
-  - files to edit
-  - what changes
-  - why
-  - risk impact
-- Validation
-  - JSON schema validation
-  - policy linting
-  - capability expansion detection
-  - dangerous diff detection
-- Preview
-  - UI diffs
-  - workflow simulation
-  - job simulation
-  - approval changes
-- Apply
-  - change applied
-  - immutable audit entry written
-  - diff hash stored
+## Quick Start
 
-## Repository layout
+### 1) Prerequisites
 
-opencorpo/
-  apps/
-    daemon/                  # Bun + Elysia backend
-    desktop/                 # Electron shell + React UI
-  packages/
-    core/                    # DB + migrations
-    agent/                   # tools, policies, jobs
-    plugin-sdk/              # plugin interfaces
-    ui-kit/
-  plugins/
-  config/                    # CONTROL PLANE (AI-editable)
-    policy.json
-    tools/
-    modules/
-    workflows/
-    jobs/
-    ui/
-    redaction.json
-  userland/
-    workspace/               # AI code patches (Tier B)
-    jobs/                    # sandboxed job scripts
-  docs/
-    architecture/
-    security/
+- Node.js 18+ (Node 20/22 recommended)
+- Bun 1.x on your PATH
+- npm (ships with Node)
 
-Note: folders exist as scaffolding today and will be filled in progressively.
+### 2) Install dependencies
 
-## Security model (enterprise-grade)
-
-### Tool-only execution
-
-The AI:
-
-- cannot access the DB directly
-- cannot make network calls directly
-- can only call registered tools
-
-### Capability-based permissions
-
-Each tool/job requires explicit capabilities that are scoped, revocable, and optionally time-bound.
-
-### Policy + approvals
-
-Actions are classified by risk. High-risk actions require approval by default.
-
-Low-risk examples:
-
-- tagging
-- notes
-- CRM field updates
-- reports
-
-High-risk examples:
-
-- sending external email
-- deleting data
-- exporting data
-- running scripts
-- installing plugins
-
-### Immutable audit log
-
-Every meaningful action produces an append-only audit entry:
-
-- actor (user / agent / plugin / job)
-- action type
-- tool/job name + version
-- policy decision
-- capability snapshot
-- timestamps
-- correlation IDs
-- optional hash chaining
-
-Audit entries are never mutated or deleted.
-
-### Secrets and encryption
-
-- OAuth tokens stored in the OS keychain
-- SQLite workspace supports encryption
-- secrets referenced, never stored in plaintext
-- optional passphrase mode
-
-## Plugin system
-
-Plugins provide:
-
-- connectors (MCP + plugins)
-- tools callable by the agent
-- background sync jobs
-
-Trust model:
-
-- Open-source mode (default): unsigned plugins allowed
-- Enterprise mode (future): plugin signing enforced
-
-All plugins:
-
-- declare permissions
-- are capability-gated
-- are audited
-
-## Connectors and MCP
-
-OpenCorpo supports external tools through MCP servers and plugins.
-
-Examples:
-
-- Exa MCP for web search
-- Notion/Figma/Slack MCP servers
-- custom internal MCP servers
-
-## Jobs and scheduled automations
-
-OpenCorpo supports first-class scheduled jobs that the AI can create and manage.
-
-Jobs are:
-
-- declarative by default
-- permissioned
-- sandboxed
-- scheduled
-- fully audited
-
-### Job types
-
-Type A - declarative jobs (default)
-
-- built from safe primitives
-- no executable code
-- preferred by AI
-
-Type B - script jobs (rare)
-
-- TypeScript scripts
-- run in sandboxed workers
-- require approval by default
-
-## Data model (core tables)
-
-- entities
-- events
-- documents
-- tasks
-- jobs
-- job_runs
-- audit_log
-- capabilities
-- plugin_registry
-- secret_refs
-
-Rule: any state change must emit an event and write an audit entry.
-
-## Local API (v1)
-
-All endpoints require:
-
-- Authorization: Bearer <launch_token>
-
-HTTP:
-
-- GET /health
-- POST /auth/session
-- GET /auth/grants
-- POST /auth/grants/:id/revoke
-- GET /events
-- GET /audit
-- GET /audit/:id
-- GET /chat/sessions
-- GET /chat/sessions/:id
-- POST /chat/sessions
-- GET /chat/messages?sessionId=:id
-- POST /chat/messages
-- GET /jobs
-- GET /jobs/:id
-- GET /jobs/runs
-- GET /jobs/runs/:id
-- POST /jobs
-- POST /jobs/run/:id
-- POST /jobs/:id/enable
-- POST /jobs/:id/disable
-- POST /tools/:toolName
-- GET /tools
-- GET /tools/registry
-- GET /tools/runs
-- GET /tools/runs/:id
-- GET /ui/config
-- GET /plugins
-- GET /approvals
-- GET /approvals/:id
-- POST /approvals
-- POST /approvals/:id/approve
-- POST /approvals/:id/deny
-- GET /diagnostics
-- GET /diagnostics/runs
-- POST /diagnostics/repair
-- POST /control-plane/reload
-- GET /control-plane/changes
-- POST /control-plane/changes/propose
-- POST /control-plane/changes/:id/apply
-- POST /control-plane/changes/:id/reject
-- GET /code/changes
-- POST /code/changes/propose
-- POST /code/changes/:id/reject
-- POST /code/changes/:id/apply
-- GET /connectors/codex/status
-- GET /connectors/codex/oauth/start
-- GET /oauth/openai/callback
-- POST /connectors/codex/disconnect
-
-WebSocket:
-
-SSE:
-
-- GET /stream (supports `?token=` for SSE clients)
-  - events
-  - approvals
-  - job status
-  - agent state
-
-## MVP success criteria
-
-A user can:
-
-- run OpenCorpo locally
-- connect an AI provider
-- add MCP servers
-- ask AI questions
-- approve AI actions
-- let AI create daily jobs
-- receive reports
-- inspect audit logs
-- watch AI reconfigure workflows safely
-
-## Status
-
-**Very early beta (active rebuild).**
-
-Current focus:
-
-- desktop-first onboarding and local daemon supervision
-- diagnostics and recovery workflows
-- safe self-edit and control-plane mutation flows
-
-The desktop shell and daemon both live in this repository under `apps/desktop` and `apps/daemon`.
-
-## Immediate next steps (coding agent)
-
-- harden production packaging with bundled Bun runtime
-- expand planner/worker intelligence for long-running tasks
-- add richer workspace patch diff previews in desktop UI
-- complete release channel automation (stable/beta/dev)
-
-## Running the current demo
-
-Desktop app (daemon auto-starts):
-
+```bash
+npm install
 ```
+
+### 3) Run desktop (recommended)
+
+```bash
 npm run dev:desktop
 ```
 
-Packaged desktop builds include a bundled Bun runtime when available on the build machine (`apps/desktop/scripts/prepare-bun-runtime.mjs`).
+This starts the desktop app; OpenCorpo will boot/supervise the daemon for you.
 
-Daemon only (debug mode):
+### 4) Optional: run daemon only (debug)
 
-```
+```bash
 bun run dev:daemon
 ```
 
-Optional AI provider key (Electron bridge):
+## Installation
 
+### Local Development Install (from source)
+
+```bash
+git clone https://github.com/toby/OpenCorpo.git
+cd OpenCorpo
+npm install
+npm run dev:desktop
 ```
-export AI_GATEWAY_API_KEY=your_key
-# or: export VERCEL_AI_API_KEY=your_key
+
+### Build Desktop App
+
+```bash
+npm run build:desktop
 ```
 
-Codex ChatGPT subscription setup:
+### Package Desktop App
 
-- In Settings, choose `Codex (ChatGPT)` as AI provider.
-- Click `Connect ChatGPT`, complete OAuth in browser, then return to OpenCorpo.
-- This path uses ChatGPT subscription OAuth (personal/dev use), not OpenAI Platform API credits.
+```bash
+npm run pack:desktop
+```
+
+### Create Distributables
+
+```bash
+npm run dist:desktop
+```
+
+Packaged desktop builds can bundle Bun via `apps/desktop/scripts/prepare-bun-runtime.mjs` when Bun is available on the build machine.
+
+## Developer Commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev:desktop` | Run desktop app in development mode |
+| `npm run dev:renderer` | Run React renderer only |
+| `npm run dev:electron` | Run Electron shell only |
+| `npm run dev:daemon` | Run daemon directly via Bun |
+| `npm run test:smoke` | Run daemon + desktop smoke checks |
+
+## Architecture
+
+```mermaid
+flowchart TB
+  UI[Desktop UI\nElectron + React] -->|localhost HTTP + SSE + token| D[Local Daemon\nBun + Elysia]
+  D --> CP[Control Plane JSON]
+  D --> DB[(SQLite)]
+  D --> TOOLS[Tools + Jobs + Policies]
+  D --> AUDIT[Immutable Audit Log]
+```
+
+### Core Components
+
+- `apps/desktop`: desktop shell + renderer UI
+- `apps/daemon`: local API, agent runtime, orchestration
+- `config/`: declarative control plane (policy/tools/jobs/ui)
+- `data/`: runtime mutable config and state
+- `userland/`: workspace for explicit Tier-B code changes
+
+## Control Plane Philosophy
+
+OpenCorpo defaults to **declarative mutation**:
+- AI edits JSON control-plane config first
+- every change is schema-validated
+- diffs can be previewed before apply
+- policy checks and risk gating happen before execution
+- audit records are append-only
+
+Tier model:
+- Tier A: config edits (`config/**/*.json`) (default)
+- Tier B: code patches (rare, explicit, user-approved)
+
+## Security Model
+
+### Tool-only execution
+
+The agent does not get implicit DB or network access. It must use registered tools.
+
+### Capability gating
+
+Each tool/job requires explicit capabilities that are scoped and revocable.
+
+### Policy + approvals
+
+Risky actions can be blocked or require approval.
+
+### Immutable auditing
+
+Important events include actor, action, policy decision, timestamps, and correlation metadata.
+
+## AI Providers
+
+OpenCorpo supports pluggable providers through the AI SDK setup.
+
+Current UX includes:
+- API-key based provider setup
+- Codex ChatGPT subscription OAuth path in Settings (`Codex (ChatGPT)`)
+
+## Current Status
+
+OpenCorpo is in **very early beta**.
+
+Expect:
+- breaking changes
+- evolving schemas/APIs
+- incomplete features
+- rapidly improving docs
+
+## Roadmap
+
+- production-hardening for packaged desktop runtime
+- stronger long-running planner/worker behavior
+- richer workspace patch previews in the desktop UI
+- release channel automation (stable/beta/dev)
+- version control
+
+## Contributing
+
+Contributions are welcome.
+
+- open Issues for bugs and proposals
+- submit focused PRs
+- prefer small, reviewable changes
+- prioritize safety, auditability, and local-first behavior
 
 ## License
 

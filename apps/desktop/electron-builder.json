@@ -27,6 +27,10 @@
     {
       "from": ".runtime/bun",
       "to": "bun"
+    },
+    {
+      "from": "../../OpenCorpo-logo.png",
+      "to": "assets/OpenCorpo-logo.png"
     }
   ],
   "directories": {

@@ -292,9 +292,7 @@ export function App() {
       <header className="sticky top-0 z-10 flex-shrink-0 border-b border-[var(--oc-border)] bg-[var(--oc-bg-elevated)]/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-[var(--oc-ink-muted)]">
-              OpenCorpo
-            </span>
+            <span className="oc-brand-wordmark text-sm text-[var(--oc-ink)]">OpenCorpo</span>
             <div className="hidden sm:flex items-center gap-2">
               {state.pendingApprovals.length > 0 && (
                 <Badge tone="warning">{state.pendingApprovals.length} pending</Badge>

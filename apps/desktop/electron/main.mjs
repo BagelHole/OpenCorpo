@@ -54,6 +54,15 @@ let daemonRestartAttempts = 0;
 let mainWindow = null;
 let securityHooksInstalled = false;
 
+function resolveWindowIconPath() {
+  if (isDev) {
+    const devIcon = path.join(projectRoot, "OpenCorpo-logo.png");
+    return existsSync(devIcon) ? devIcon : undefined;
+  }
+  const packagedIcon = path.join(process.resourcesPath, "assets", "OpenCorpo-logo.png");
+  return existsSync(packagedIcon) ? packagedIcon : undefined;
+}
+
 function installSessionSecurityHooks() {
   if (securityHooksInstalled) return;
   const ses = BrowserWindow.getAllWindows()[0]?.webContents?.session;
@@ -80,6 +89,7 @@ function installSessionSecurityHooks() {
 }
 
 function createWindow() {
+  const iconPath = resolveWindowIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -88,6 +98,7 @@ function createWindow() {
     backgroundColor: "#f8fafc",
     autoHideMenuBar: true,
     show: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

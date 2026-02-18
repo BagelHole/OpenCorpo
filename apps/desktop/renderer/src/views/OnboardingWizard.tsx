@@ -156,8 +156,8 @@ export function OnboardingWizard({
     <div className="mx-auto flex w-full max-w-2xl flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
       <Card>
         <CardHeader className="space-y-3 border-b border-[var(--oc-border)]">
-          <div className="text-xs font-semibold uppercase tracking-widest text-[var(--oc-ink-muted)]">
-            OpenCorpo Setup
+          <div className="flex items-center gap-2 text-[var(--oc-ink-muted)]">
+            <span className="oc-brand-wordmark text-xs text-[var(--oc-ink)]">OpenCorpo Setup</span>
           </div>
           <CardTitle className="text-xl sm:text-2xl">Let&apos;s make this effortless</CardTitle>
           <div className="flex flex-wrap gap-2 text-xs">
