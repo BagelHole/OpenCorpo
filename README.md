@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="./OpenCorpo.png" alt="OpenCorpo" width="220" />
-
-  # OpenCorpo
+  <img src="./OpenCorpo.png" alt="OpenCorpo" width="1000" />
 
   **Self-editing, local-first business operating system powered by an AI operator.**
 
