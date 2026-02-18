@@ -29,9 +29,9 @@
 
 ## Connectors
 
-- Gmail manual token flow works
-- Gmail OAuth flow opens browser and callback stores token
-- Gmail `search/read/draft/send` tool calls return structured responses
+- Codex OAuth flow opens browser and callback stores token
+- MCP server settings save/reload successfully
+- MCP tools are invokable by the AI and visible in tool runs
 
 ## Packaging Targets
 

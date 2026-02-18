@@ -65,6 +65,14 @@ export type AgentContext = {
   handlerNames?: string[];
   /** Called after control-plane changes are applied so runtime caches are refreshed. */
   onControlPlaneChanged?: () => Promise<void>;
+  /** Execute a registered runtime tool by name with full policy/approval enforcement. */
+  invokeRuntimeTool?: (
+    toolName: string,
+    input: Record<string, unknown>
+  ) => Promise<
+    | { ok: true; result: unknown }
+    | { ok: false; error: string; approvalRequired?: boolean; approvalId?: number }
+  >;
 };
 
 const LIST_LIMIT = 8;
@@ -166,7 +174,7 @@ function buildPlan(prompt: string): AgentPlan {
   if (matchesAny(normalized, ["tools", "capabilities"])) {
     return { intent: "tools", confidence: "high", steps: ["tools"] };
   }
-  if (matchesAny(normalized, ["plugins", "integrations", "gmail", "email"])) {
+  if (matchesAny(normalized, ["plugins", "integrations", "connectors"])) {
     return { intent: "plugins", confidence: "high", steps: ["plugins"] };
   }
   return { intent: "status", confidence: "low", steps: ["status"] };
@@ -350,17 +358,13 @@ export function buildPluginsList(plugins: PluginSummary[]) {
 }
 
 export function buildDataSourceHint(plugins: PluginSummary[], tools: ToolDefinition[]) {
-  const hasGmail = plugins.some((plugin) => plugin.name === "gmail");
   const toolNames = tools.map((tool) => tool.name);
   const lines = [
-    "Data sources are powered by plugins and tools.",
-    hasGmail
-      ? "- Gmail plugin is installed. Use Gmail tools once OAuth is configured."
-      : "- Gmail plugin is not installed yet."
+    "Data sources are powered by plugins and tools."
   ];
-  const gmailTools = toolNames.filter((name) => name.startsWith("gmail."));
-  if (gmailTools.length > 0) {
-    lines.push(`- Gmail tools available: ${gmailTools.join(", ")}`);
+  const mcpTools = toolNames.filter((name) => name.startsWith("mcp."));
+  if (mcpTools.length > 0) {
+    lines.push(`- MCP tools available: ${mcpTools.slice(0, 10).join(", ")}`);
   }
   lines.push("Say \"plugins\" or \"tools\" to see what is loaded.");
   return lines.join("\n");
@@ -579,7 +583,7 @@ async function executePlanStep(
   if (step === "audit") return { text: buildAuditList(context.db) };
   if (step === "tools") return { text: buildToolsList(context.tools) };
   if (step === "plugins") {
-    if (matchesAny(normalized, ["email", "gmail"])) {
+    if (matchesAny(normalized, ["connectors", "integrations", "mcp"])) {
       return { text: buildDataSourceHint(context.plugins, context.tools) };
     }
     return { text: buildPluginsList(context.plugins) };

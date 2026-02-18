@@ -24,10 +24,9 @@
 
 | Flow | Expected Result |
 | --- | --- |
-| Gmail manual token | Connector status becomes connected |
-| Gmail OAuth | Browser auth URL opens and callback persists token |
-| Gmail search/read | Structured responses with ids/message details |
-| Gmail draft/send | Draft/message IDs return on success |
+| Codex OAuth | Browser auth URL opens and callback persists token |
+| Save MCP settings | MCP settings persist and daemon reload reflects them |
+| MCP tool call | AI can invoke `mcp.*` tools and tool run is recorded |
 
 ## Platform Build Targets
 

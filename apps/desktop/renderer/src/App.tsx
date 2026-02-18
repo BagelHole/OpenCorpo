@@ -237,26 +237,25 @@ export function App() {
           daemonStatus={state.daemonStatus}
           diagnostics={state.diagnostics}
           plugins={state.plugins}
-          gmailStatus={state.gmailStatus}
           codexStatus={state.codexStatus}
           onboarding={state.onboarding}
           profile={state.profile}
           aiModelDefaults={state.aiModelDefaults}
           scriptSecrets={state.scriptSecrets}
           scriptExecutionMode={state.scriptExecutionMode}
+          mcpSettings={state.mcpSettings}
           persistOnboarding={state.persistOnboarding}
           onSaveProfile={state.saveProfile}
           onSaveAiModelDefaults={state.saveAiModelDefaults}
           onSaveScriptSecret={state.saveScriptSecret}
           onSaveScriptExecutionMode={state.saveScriptExecutionMode}
+          onSaveMcpSettings={state.saveMcpSettings}
           saveAiProvider={state.saveAiProvider}
           onRestartDaemon={state.restartDaemon}
           onRunDiagnostics={state.runDiagnosticsNow}
           onRunRepair={state.runRepair}
-          onGetOauthStart={state.getGmailOauthStart}
           onGetCodexOauthStart={state.getCodexOauthStart}
           onDisconnectCodex={state.disconnectCodex}
-          onSaveGmailToken={state.saveGmailToken}
           onSaveAiKey={state.saveAiKey}
           checkAiKeyConfigured={state.checkAiKeyConfigured}
           onToggleAdvanced={setAdvancedAndPersist}
@@ -276,15 +275,12 @@ export function App() {
       <div className="min-h-screen bg-[var(--oc-bg)] flex items-center justify-center p-4">
         <OnboardingWizard
           onboarding={state.onboarding}
-          gmailConnected={state.gmailStatus.connected}
           persistOnboarding={state.persistOnboarding}
           completeOnboarding={state.completeOnboarding}
-          saveGmailToken={state.saveGmailToken}
           saveAiKey={state.saveAiKey}
           saveProfile={state.saveProfile}
           saveAiProvider={state.saveAiProvider}
           checkAiKeyConfigured={state.checkAiKeyConfigured}
-          getGmailOauthStart={state.getGmailOauthStart}
           getCodexOauthStart={state.getCodexOauthStart}
         />
       </div>

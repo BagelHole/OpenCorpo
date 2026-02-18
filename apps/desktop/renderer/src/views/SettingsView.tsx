@@ -27,12 +27,6 @@ type PluginInfo = {
   error?: string | null;
 };
 
-type GmailStatus = {
-  connected: boolean;
-  tokenSource: string | null;
-  refreshConfigured: boolean;
-};
-
 type ScriptSecretItem = {
   name: string;
   ref: string;
@@ -42,12 +36,24 @@ type ScriptSecretItem = {
 };
 
 type ScriptExecutionMode = "safe" | "trusted";
+type McpSettings = {
+  servers: Array<{
+    id: string;
+    name: string;
+    url: string;
+    headers: Record<string, string>;
+    enabled: boolean;
+  }>;
+  webSearch: {
+    serverId: string;
+    toolName: string;
+  };
+};
 
 type OnboardingData = {
   completed: boolean;
   aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
-  gmailAccessToken: string;
   profile: {
     name: string;
     role: string;
@@ -96,26 +102,25 @@ export function SettingsView({
   daemonStatus,
   diagnostics,
   plugins,
-  gmailStatus,
   codexStatus,
   onboarding,
   profile,
   aiModelDefaults,
   scriptSecrets,
   scriptExecutionMode,
+  mcpSettings,
   persistOnboarding,
   onSaveProfile,
   onSaveAiModelDefaults,
   onSaveScriptSecret,
   onSaveScriptExecutionMode,
+  onSaveMcpSettings,
   saveAiProvider,
   onRestartDaemon,
   onRunDiagnostics,
   onRunRepair,
-  onGetOauthStart,
   onGetCodexOauthStart,
   onDisconnectCodex,
-  onSaveGmailToken,
   onSaveAiKey,
   checkAiKeyConfigured,
   onToggleAdvanced,
@@ -125,7 +130,6 @@ export function SettingsView({
   daemonStatus: DaemonStatus;
   diagnostics: DiagnosticsReport | null;
   plugins: PluginInfo[];
-  gmailStatus: GmailStatus;
   codexStatus: CodexStatus;
   onboarding: OnboardingData;
   profile: {
@@ -142,6 +146,7 @@ export function SettingsView({
   };
   scriptSecrets: ScriptSecretItem[];
   scriptExecutionMode: ScriptExecutionMode;
+  mcpSettings: McpSettings;
   persistOnboarding: (next: OnboardingData) => void;
   onSaveProfile: (profile: {
     name: string;
@@ -161,14 +166,13 @@ export function SettingsView({
     description?: string;
   }) => Promise<void>;
   onSaveScriptExecutionMode: (mode: ScriptExecutionMode) => Promise<void>;
+  onSaveMcpSettings: (settings: McpSettings) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
   onRestartDaemon: () => Promise<void>;
   onRunDiagnostics: () => Promise<void>;
   onRunRepair: () => Promise<void>;
-  onGetOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   onGetCodexOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   onDisconnectCodex: () => Promise<void>;
-  onSaveGmailToken: (token: string) => Promise<void>;
   onSaveAiKey: (key: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
   onToggleAdvanced: (next: boolean) => void;
@@ -177,13 +181,13 @@ export function SettingsView({
 }) {
   const editableFieldClass =
     "w-full rounded-lg border border-[var(--oc-border-strong)] bg-[var(--oc-bg-elevated)] px-3 py-2 text-sm text-[var(--oc-ink)] shadow-[inset_0_1px_0_rgba(0,0,0,0.04)] outline-none transition placeholder:text-[var(--oc-ink-muted)] focus:border-[var(--oc-accent)] focus:shadow-[0_0_0_2px_var(--oc-bg-elevated),0_0_0_3px_var(--oc-border-strong)]";
-  const [tokenInput, setTokenInput] = useState("");
   const [aiKeyInput, setAiKeyInput] = useState("");
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
   const [aiKeyMessage, setAiKeyMessage] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [scriptSecretMessage, setScriptSecretMessage] = useState<string | null>(null);
   const [scriptModeMessage, setScriptModeMessage] = useState<string | null>(null);
+  const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [scriptSecretNameInput, setScriptSecretNameInput] = useState("");
   const [scriptSecretDescriptionInput, setScriptSecretDescriptionInput] = useState("");
   const [scriptSecretValueInput, setScriptSecretValueInput] = useState("");
@@ -191,6 +195,8 @@ export function SettingsView({
   const [modelDefaultsInput, setModelDefaultsInput] = useState(() =>
     normalizeModelDefaults(aiModelDefaults)
   );
+  const [mcpInput, setMcpInput] = useState<McpSettings>(mcpSettings);
+  const [mcpHeaderDrafts, setMcpHeaderDrafts] = useState<Record<string, string>>({});
   const pluginFailures = useMemo(() => plugins.filter((p) => !p.loaded), [plugins]);
 
   useEffect(() => {
@@ -200,6 +206,15 @@ export function SettingsView({
   useEffect(() => {
     setModelDefaultsInput(normalizeModelDefaults(aiModelDefaults));
   }, [aiModelDefaults]);
+
+  useEffect(() => {
+    setMcpInput(mcpSettings);
+    setMcpHeaderDrafts(
+      Object.fromEntries(
+        mcpSettings.servers.map((server) => [server.id, JSON.stringify(server.headers)])
+      )
+    );
+  }, [mcpSettings]);
 
   useEffect(() => {
     void checkAiKeyConfigured().then(setAiKeyConfigured);
@@ -229,16 +244,6 @@ export function SettingsView({
     }
   };
 
-  const connectOAuth = async () => {
-    const start = await onGetOauthStart();
-    if (!start.ok || !start.authUrl) {
-      setLocalMessage(start.error ?? "Failed to start OAuth.");
-      return;
-    }
-    window.open(start.authUrl, "_blank", "noopener,noreferrer");
-    setLocalMessage("Complete sign-in in your browser, then run diagnostics here.");
-  };
-
   const connectCodexOAuth = async () => {
     const start = await onGetCodexOauthStart();
     if (!start.ok || !start.authUrl) {
@@ -256,16 +261,6 @@ export function SettingsView({
     } catch (error) {
       setAiKeyMessage(error instanceof Error ? error.message : "Failed to disconnect Codex.");
     }
-  };
-
-  const saveToken = async () => {
-    if (!tokenInput.trim()) {
-      setLocalMessage("Paste an access token first.");
-      return;
-    }
-    await onSaveGmailToken(tokenInput.trim());
-    setTokenInput("");
-    setLocalMessage("Token saved.");
   };
 
   const saveProfile = async () => {
@@ -338,6 +333,55 @@ export function SettingsView({
         error instanceof Error ? error.message : "Failed to update script mode."
       );
     }
+  };
+
+  const saveMcp = async () => {
+    try {
+      await onSaveMcpSettings(mcpInput);
+      setMcpMessage("MCP settings saved. MCP tools are now available to the AI.");
+    } catch (error) {
+      setMcpMessage(error instanceof Error ? error.message : "Failed to save MCP settings.");
+    }
+  };
+
+  const addMcpServer = () => {
+    const nextIndex = mcpInput.servers.length + 1;
+    const id = `server_${nextIndex}`;
+    setMcpInput((current) => ({
+      ...current,
+      servers: [
+        ...current.servers,
+        {
+          id,
+          name: `Server ${nextIndex}`,
+          url: "",
+          headers: {},
+          enabled: true
+        }
+      ]
+    }));
+    setMcpHeaderDrafts((current) => ({ ...current, [id]: "{}" }));
+  };
+
+  const removeMcpServer = (id: string) => {
+    setMcpInput((current) => {
+      const remaining = current.servers.filter((server) => server.id !== id);
+      const fallbackServerId = remaining[0]?.id ?? "";
+      return {
+        ...current,
+        servers: remaining,
+        webSearch: {
+          ...current.webSearch,
+          serverId:
+            current.webSearch.serverId === id ? fallbackServerId : current.webSearch.serverId
+        }
+      };
+    });
+    setMcpHeaderDrafts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
   };
 
   return (
@@ -507,6 +551,137 @@ export function SettingsView({
 
       <Card>
         <CardHeader>
+          <CardTitle>MCP Servers</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="space-y-3">
+            {mcpInput.servers.map((server, index) => (
+              <div
+                key={server.id || `${index}`}
+                className="space-y-2 rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] p-3"
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    value={server.id}
+                    onChange={(event) => {
+                      const nextId = event.target.value;
+                      setMcpInput((current) => ({
+                        ...current,
+                        servers: current.servers.map((row) =>
+                          row.id === server.id ? { ...row, id: nextId } : row
+                        ),
+                        webSearch:
+                          current.webSearch.serverId === server.id
+                            ? { ...current.webSearch, serverId: nextId }
+                            : current.webSearch
+                      }));
+                      setMcpHeaderDrafts((current) => {
+                        if (!(server.id in current)) return current;
+                        const next = { ...current };
+                        next[nextId] = next[server.id];
+                        delete next[server.id];
+                        return next;
+                      });
+                    }}
+                    className={editableFieldClass}
+                    placeholder="Server ID"
+                  />
+                  <input
+                    value={server.name}
+                    onChange={(event) =>
+                      setMcpInput((current) => ({
+                        ...current,
+                        servers: current.servers.map((row) =>
+                          row.id === server.id ? { ...row, name: event.target.value } : row
+                        )
+                      }))
+                    }
+                    className={editableFieldClass}
+                    placeholder="Display name"
+                  />
+                </div>
+                <input
+                  value={server.url}
+                  onChange={(event) =>
+                    setMcpInput((current) => ({
+                      ...current,
+                      servers: current.servers.map((row) =>
+                        row.id === server.id ? { ...row, url: event.target.value } : row
+                      )
+                    }))
+                  }
+                  className={editableFieldClass}
+                  placeholder="MCP URL (https://...)"
+                />
+                <input
+                  value={mcpHeaderDrafts[server.id] ?? JSON.stringify(server.headers)}
+                  onChange={(event) => {
+                    const nextText = event.target.value;
+                    setMcpHeaderDrafts((current) => ({ ...current, [server.id]: nextText }));
+                    try {
+                      const parsed = JSON.parse(nextText) as unknown;
+                      let nextHeaders: Record<string, string> = {};
+                      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                        nextHeaders = Object.fromEntries(
+                          Object.entries(parsed as Record<string, unknown>).filter(
+                            ([, value]) => typeof value === "string"
+                          )
+                        ) as Record<string, string>;
+                      }
+                      setMcpInput((current) => ({
+                        ...current,
+                        servers: current.servers.map((row) =>
+                          row.id === server.id ? { ...row, headers: nextHeaders } : row
+                        )
+                      }));
+                    } catch {}
+                  }}
+                  className={editableFieldClass}
+                  placeholder='Headers JSON (example: {"Authorization":"Bearer ..."} )'
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() =>
+                      setMcpInput((current) => ({
+                        ...current,
+                        servers: current.servers.map((row) =>
+                          row.id === server.id ? { ...row, enabled: !row.enabled } : row
+                        )
+                      }))
+                    }
+                    className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                      server.enabled
+                        ? "border-[var(--oc-success)] bg-[var(--oc-success-bg)] text-[var(--oc-success)]"
+                        : "border-[var(--oc-border)] bg-[var(--oc-bg-elevated)] text-[var(--oc-ink-muted)]"
+                    }`}
+                  >
+                    {server.enabled ? "Enabled" : "Disabled"}
+                  </button>
+                  <Button size="sm" variant="secondary" onClick={() => removeMcpServer(server.id)}>
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={addMcpServer}>
+              Add server
+            </Button>
+          </div>
+          <Button size="sm" onClick={() => void saveMcp()}>
+            Save MCP settings
+          </Button>
+          {mcpMessage && (
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+              {mcpMessage}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Script Security Mode</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
@@ -614,44 +789,6 @@ export function SettingsView({
 
       <Card>
         <CardHeader>
-          <CardTitle>Gmail</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex items-center justify-between rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2">
-            <span className="text-[var(--oc-ink-muted)]">Status</span>
-            <Badge tone={gmailStatus.connected ? "success" : "warning"}>
-              {gmailStatus.connected ? "Connected" : "Not connected"}
-            </Badge>
-          </div>
-          <div className="text-xs text-[var(--oc-ink-muted)]">
-            Source: {gmailStatus.tokenSource ?? "none"} • Refresh: {gmailStatus.refreshConfigured ? "yes" : "no"}
-          </div>
-          <div className="space-y-2">
-            <input
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              className={editableFieldClass}
-              placeholder="Paste Gmail access token"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void saveToken()}>
-                Save token
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => void connectOAuth()}>
-                Connect via OAuth
-              </Button>
-            </div>
-          </div>
-          {localMessage && (
-            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
-              {localMessage}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>User Profile</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
@@ -691,6 +828,11 @@ export function SettingsView({
           <Button size="sm" onClick={() => void saveProfile()}>
             Save profile
           </Button>
+          {localMessage && (
+            <div className="rounded-lg bg-[var(--oc-bg-elevated)] px-3 py-2 text-xs text-[var(--oc-ink-muted)]">
+              {localMessage}
+            </div>
+          )}
         </CardContent>
       </Card>
 

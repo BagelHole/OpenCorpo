@@ -143,6 +143,8 @@ button, input, textarea {
 
 .oc-markdown {
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .oc-markdown p {
@@ -179,9 +181,67 @@ button, input, textarea {
   background: transparent;
 }
 
+.oc-markdown .hljs {
+  display: block;
+  overflow-x: auto;
+  color: var(--oc-ink);
+  background: transparent;
+}
+
+.oc-markdown .hljs-comment,
+.oc-markdown .hljs-quote {
+  color: var(--oc-ink-muted);
+}
+
+.oc-markdown .hljs-keyword,
+.oc-markdown .hljs-selector-tag,
+.oc-markdown .hljs-subst {
+  color: #86efac;
+}
+
+.oc-markdown .hljs-number,
+.oc-markdown .hljs-literal,
+.oc-markdown .hljs-variable,
+.oc-markdown .hljs-template-variable,
+.oc-markdown .hljs-tag .hljs-attr {
+  color: #fbbf24;
+}
+
+.oc-markdown .hljs-string,
+.oc-markdown .hljs-doctag {
+  color: #67e8f9;
+}
+
+.oc-markdown .hljs-title,
+.oc-markdown .hljs-section,
+.oc-markdown .hljs-selector-id {
+  color: #93c5fd;
+}
+
+.oc-markdown .hljs-type,
+.oc-markdown .hljs-class .hljs-title {
+  color: #f9a8d4;
+}
+
+.oc-markdown .hljs-tag,
+.oc-markdown .hljs-name,
+.oc-markdown .hljs-attribute {
+  color: #5eead4;
+}
+
+.oc-markdown .hljs-emphasis {
+  font-style: italic;
+}
+
+.oc-markdown .hljs-strong {
+  font-weight: 600;
+}
+
 .oc-markdown a {
   color: var(--oc-accent);
   text-decoration: underline;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .oc-scrollbar-subtle {

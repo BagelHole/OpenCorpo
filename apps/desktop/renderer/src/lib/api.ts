@@ -24,6 +24,20 @@ export type ScriptSecretItem = {
 };
 
 export type ScriptExecutionMode = "safe" | "trusted";
+export type McpServerConfig = {
+  id: string;
+  name: string;
+  url: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+};
+export type McpSettings = {
+  servers: McpServerConfig[];
+  webSearch: {
+    serverId: string;
+    toolName: string;
+  };
+};
 export type CodexStatus = {
   connected: boolean;
   provider: string | null;
@@ -209,27 +223,6 @@ export class OpenCorpoApi {
   }
 
   // Connectors
-  async getGmailStatus() {
-    return this.get<{
-      connected: boolean;
-      tokenSource: string | null;
-      refreshConfigured: boolean;
-    }>("/connectors/gmail/status");
-  }
-
-  async saveGmailToken(accessToken: string, refreshToken?: string) {
-    return this.post<{ ok: boolean }>("/connectors/gmail/token", {
-      accessToken,
-      refreshToken,
-    });
-  }
-
-  async getGmailOauthStart() {
-    return this.get<{ ok: boolean; authUrl?: string; error?: string }>(
-      "/connectors/gmail/oauth/start"
-    );
-  }
-
   async getCodexStatus() {
     return this.get<CodexStatus>("/connectors/codex/status");
   }
@@ -319,6 +312,16 @@ export class OpenCorpoApi {
       "/settings/script-execution-mode",
       { mode }
     );
+  }
+
+  async getMcpSettings() {
+    return this.get<{ settings: McpSettings }>("/settings/mcp");
+  }
+
+  async saveMcpSettings(settings: McpSettings) {
+    return this.post<{ ok: boolean; settings: McpSettings }>("/settings/mcp", {
+      settings
+    });
   }
 
   async resolveWidgetProps(input: { props: Record<string, unknown> }) {

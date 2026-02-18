@@ -1,6 +1,5 @@
 import type { DbHandle } from "./db";
 import { verifyAuditIntegrity } from "./audit";
-import { getSecretRef } from "./secrets";
 
 export type DiagnosticsContext = {
   controlPlaneValidation: Array<{ path: string; valid: boolean; errors: string[] }>;
@@ -24,8 +23,6 @@ export function runDiagnostics(db: DbHandle, context: DiagnosticsContext) {
       .get() as { count: number } | null
   )?.count ?? 0;
   const auditIntegrity = verifyAuditIntegrity(db);
-  const gmailRef = getSecretRef(db, "gmail.access_token");
-
   const checks = [
     {
       id: "control_plane_valid",
@@ -66,14 +63,6 @@ export function runDiagnostics(db: DbHandle, context: DiagnosticsContext) {
       detail: `${waitingJobRuns} job runs are waiting for approval.`
     },
     {
-      id: "gmail_connector_secret",
-      label: "Gmail connector auth",
-      ok: Boolean(gmailRef),
-      detail: gmailRef
-        ? "Gmail access token reference is configured."
-        : "Gmail access token is not configured."
-    },
-    {
       id: "schema_migrations",
       label: "Database schema migration",
       ok: Boolean(context.migrations.currentVersion),
@@ -91,9 +80,6 @@ export function runDiagnostics(db: DbHandle, context: DiagnosticsContext) {
     recommendations: [
       ...(!checks.find((item) => item.id === "control_plane_valid")?.ok
         ? ["Fix schema errors in Control Plane before applying AI edits."]
-        : []),
-      ...(!checks.find((item) => item.id === "gmail_connector_secret")?.ok
-        ? ["Connect Gmail in settings to enable email automation."]
         : []),
       ...(pluginErrors.length > 0
         ? ["Review plugin errors and restart daemon after fixes."]

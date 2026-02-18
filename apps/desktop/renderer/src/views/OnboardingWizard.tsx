@@ -7,7 +7,6 @@ type OnboardingData = {
   completed: boolean;
   aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
-  gmailAccessToken: string;
   profile: {
     name: string;
     role: string;
@@ -18,10 +17,8 @@ type OnboardingData = {
 
 type Props = {
   onboarding: OnboardingData;
-  gmailConnected: boolean;
   persistOnboarding: (next: OnboardingData) => void;
   completeOnboarding: () => void;
-  saveGmailToken: (token: string) => Promise<void>;
   saveAiKey: (key: string) => Promise<void>;
   saveProfile: (profile: {
     name: string;
@@ -31,7 +28,6 @@ type Props = {
   }) => Promise<void>;
   saveAiProvider?: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
-  getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   getCodexOauthStart?: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
 };
 
@@ -48,19 +44,15 @@ function normalizeProfile(
 
 export function OnboardingWizard({
   onboarding,
-  gmailConnected,
   persistOnboarding,
   completeOnboarding,
-  saveGmailToken,
   saveAiKey,
   saveProfile,
   saveAiProvider,
   checkAiKeyConfigured,
-  getGmailOauthStart,
   getCodexOauthStart
 }: Props) {
   const [step, setStep] = useState(0);
-  const [tokenInput, setTokenInput] = useState(onboarding.gmailAccessToken ?? "");
   const [aiKeyInput, setAiKeyInput] = useState(onboarding.aiKey ?? "");
   const [profileInput, setProfileInput] = useState(() => normalizeProfile(onboarding.profile));
   const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
@@ -73,7 +65,6 @@ export function OnboardingWizard({
       "Your Profile",
       "Choose AI Provider",
       "Enter API Key",
-      "Connect Gmail (Optional)",
       "Finish Setup"
     ],
     []
@@ -159,42 +150,6 @@ export function OnboardingWizard({
   const finish = () => {
     setLocalError(null);
     completeOnboarding();
-  };
-
-  const handleSaveToken = async () => {
-    if (!tokenInput.trim()) {
-      setLocalError("Please paste a Gmail access token.");
-      return;
-    }
-    setSaving(true);
-    setLocalError(null);
-    try {
-      await saveGmailToken(tokenInput.trim());
-      persistOnboarding({
-        ...onboarding,
-        gmailAccessToken: tokenInput.trim()
-      });
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "Unable to save token.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleOauthConnect = async () => {
-    try {
-      const response = await getGmailOauthStart();
-      if (!response.ok || !response.authUrl) {
-        setLocalError(response.error ?? "Unable to start OAuth.");
-        return;
-      }
-      window.open(response.authUrl, "_blank", "noopener,noreferrer");
-      setLocalError(
-        "Finish sign-in in the browser tab, then return here and continue."
-      );
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "OAuth start failed.");
-    }
   };
 
   return (
@@ -360,40 +315,6 @@ export function OnboardingWizard({
           )}
 
           {step === 4 && (
-            <div className="space-y-4 text-sm text-[var(--oc-ink-muted)]">
-              <div className="flex items-center gap-3">
-                <span>Gmail status:</span>
-                <Badge tone={gmailConnected ? "success" : "warning"}>
-                  {gmailConnected ? "Connected" : "Not connected"}
-                </Badge>
-              </div>
-              <p className="text-sm text-[var(--oc-ink-muted)]">
-                This step is optional. You can skip now and connect Gmail later in
-                Settings.
-              </p>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wider text-[var(--oc-ink-muted)]">
-                  Gmail access token (quick path)
-                </label>
-                <input
-                  value={tokenInput}
-                  onChange={(event) => setTokenInput(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--oc-border-strong)] focus:ring-2 focus:ring-[var(--oc-border)]"
-                  placeholder="Paste access token"
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void handleSaveToken()} disabled={saving}>
-                  {saving ? "Saving..." : "Save token"}
-                </Button>
-                <Button variant="secondary" onClick={() => void handleOauthConnect()}>
-                  Open OAuth connect
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {step === 5 && (
             <div className="space-y-3 text-sm text-[var(--oc-ink-muted)]">
               <p>Everything is ready. OpenCorpo will now launch your clean workspace.</p>
               <ul className="space-y-1">
@@ -427,7 +348,7 @@ export function OnboardingWizard({
                   setStep((prev) => Math.min(steps.length - 1, prev + 1));
                 }}
               >
-                {step === 4 ? "Continue without Gmail" : "Continue"}
+                Continue
               </Button>
             ) : (
               <Button onClick={() => void finish()}>Enter OpenCorpo</Button>

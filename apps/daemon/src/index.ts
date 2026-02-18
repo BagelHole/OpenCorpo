@@ -31,6 +31,7 @@ import { executeTool } from "./tool-runner";
 import { listApprovedApprovals, markApprovalExecuted, markApprovalFailed } from "./approval-exec";
 import { attachEventBroadcast, registerClient, unregisterClient } from "./stream";
 import { buildToolRegistry, validateToolInput } from "./tool-registry";
+import { buildMcpRuntimeTools } from "./mcp-runtime";
 import { seedJobsFromConfig } from "./job-config";
 import {
   addMessage,
@@ -82,6 +83,10 @@ import {
 } from "./script-security";
 import { extractUserMemoryNotes } from "./user-memory";
 import {
+  normalizeMcpSettings,
+  parseMcpSettingsFromSecret
+} from "./mcp-settings";
+import {
   CODEX_DEFAULT_REDIRECT_URI,
   consumeCodexOauthVerifier,
   createCodexOauthStart,
@@ -94,14 +99,6 @@ const dbPath = process.env.OPENCORPO_DB_PATH;
 const db = openDb(dbPath);
 const migrations = ensureSchema(db);
 const auditRepair = repairAuditIntegrity(db);
-const existingGmailAccessToken = getSecretValue(db, "gmail.access_token");
-if (existingGmailAccessToken) {
-  process.env.OPENCORPO_GMAIL_ACCESS_TOKEN = existingGmailAccessToken;
-}
-const existingGmailRefreshToken = getSecretValue(db, "gmail.refresh_token");
-if (existingGmailRefreshToken) {
-  process.env.OPENCORPO_GMAIL_REFRESH_TOKEN = existingGmailRefreshToken;
-}
 const existingAiGatewayApiKey = getSecretValue(db, "ai.api_key");
 if (existingAiGatewayApiKey) {
   process.env.AI_GATEWAY_API_KEY = existingAiGatewayApiKey;
@@ -127,6 +124,10 @@ const existingCodexAccountId = getSecretValue(db, "ai.codex.account_id");
 if (existingCodexAccountId) {
   process.env.OPENCORPO_CODEX_ACCOUNT_ID = existingCodexAccountId.trim();
 }
+const existingMcpSettings = getSecretValue(db, "mcp.settings");
+process.env.OPENCORPO_MCP_SETTINGS = JSON.stringify(
+  parseMcpSettingsFromSecret(existingMcpSettings)
+);
 
 const auth = getAuthState();
 let controlPlane = loadControlPlane();
@@ -142,7 +143,12 @@ let plugins = pluginLoadResults.map((entry) => ({
 let pluginTools = pluginLoadResults
   .filter((entry) => entry.loaded && entry.definition)
   .flatMap((entry) => entry.definition?.tools ?? []);
-let toolRegistry = buildToolRegistry(toolsConfig, pluginTools);
+let mcpRuntime = await buildMcpRuntimeTools(process.env.OPENCORPO_MCP_SETTINGS);
+let toolRegistry = buildToolRegistry(
+  [...toolsConfig, ...mcpRuntime.definitions],
+  [...pluginTools, ...mcpRuntime.handlers]
+);
+toolRegistry.warnings.push(...mcpRuntime.warnings);
 seedJobsFromConfig(db, controlPlane.root);
 attachEventBroadcast(db);
 
@@ -259,7 +265,12 @@ async function rebuildRuntimeState() {
   pluginTools = pluginLoadResults
     .filter((entry) => entry.loaded && entry.definition)
     .flatMap((entry) => entry.definition?.tools ?? []);
-  toolRegistry = buildToolRegistry(toolsConfig, pluginTools);
+  mcpRuntime = await buildMcpRuntimeTools(process.env.OPENCORPO_MCP_SETTINGS);
+  toolRegistry = buildToolRegistry(
+    [...toolsConfig, ...mcpRuntime.definitions],
+    [...pluginTools, ...mcpRuntime.handlers]
+  );
+  toolRegistry.warnings.push(...mcpRuntime.warnings);
   seedJobsFromConfig(db, controlPlane.root);
 }
 
@@ -545,69 +556,61 @@ function getScriptDbSessionFromRequest(request: Request) {
 
 function isBypassPath(pathname: string) {
   return (
-    pathname.startsWith("/oauth/google/callback") ||
     pathname.startsWith("/oauth/openai/callback") ||
     pathname.startsWith("/script-db/")
   );
 }
 
-async function exchangeGoogleCodeForToken(
-  code: string,
-  redirectUri: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
-  if (!clientId || !clientSecret) {
-    return { ok: false, error: "google_oauth_not_configured" };
+async function invokeRegisteredToolAsAgent(
+  toolName: string,
+  input: Record<string, unknown>
+): Promise<
+  | { ok: true; result: unknown }
+  | { ok: false; error: string; approvalRequired?: boolean; approvalId?: number }
+> {
+  const tool = findTool(toolRegistry.definitions, toolName);
+  if (!tool) return { ok: false, error: "tool_not_found" };
+  const inputValidation = validateToolInput(toolRegistry, tool.name, input);
+  if (!inputValidation.valid) {
+    return { ok: false, error: `invalid_input:${inputValidation.errors.join("; ")}` };
   }
-  const payload = new URLSearchParams({
-    code,
-    client_id: clientId,
-    client_secret: clientSecret,
-    redirect_uri: redirectUri,
-    grant_type: "authorization_code"
+  const policyResult = evaluatePolicy(policy, {
+    risk: tool.risk,
+    tool: tool.name,
+    action: "invoke",
+    actor: "agent"
   });
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded"
-    },
-    body: payload.toString()
-  });
-  if (!response.ok) {
-    return { ok: false, error: `google_token_exchange_failed:${response.status}` };
+  if (policyResult.decision === "deny") {
+    return { ok: false, error: `policy_denied:${policyResult.reason ?? "denied"}` };
   }
-  const data = (await response.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-  };
-  if (!data.access_token) {
-    return { ok: false, error: "google_access_token_missing" };
-  }
-  setSecretRef(db, {
-    name: "gmail.access_token",
-    value: data.access_token,
-    provider: "google_oauth",
-    metadata: {
-      expiresInSeconds: data.expires_in ?? null
-    }
-  });
-  process.env.OPENCORPO_GMAIL_ACCESS_TOKEN = data.access_token;
-  if (data.refresh_token) {
-    setSecretRef(db, {
-      name: "gmail.refresh_token",
-      value: data.refresh_token,
-      provider: "google_oauth"
+  if (policyResult.decision === "approve" || tool.risk === "high") {
+    const approvalId = createApproval(db, {
+      requestedBy: "agent",
+      tool: tool.name,
+      action: "invoke",
+      reason: policyResult.reason ?? "High-risk tool requires approval.",
+      metadata: { input }
     });
-    process.env.OPENCORPO_GMAIL_REFRESH_TOKEN = data.refresh_token;
+    writeAudit(db, {
+      actor: "agent",
+      action: "tool_approval_requested",
+      tool: tool.name,
+      metadata: { approvalId }
+    });
+    writeEvent(db, { type: "tool.approval.requested", data: { approvalId } });
+    return { ok: false, error: "approval_required", approvalRequired: true, approvalId };
   }
-  writeAudit(db, {
-    actor: "user",
-    action: "gmail_oauth_connected"
-  });
-  writeEvent(db, { type: "connector.gmail.connected", data: { source: "oauth" } });
-  return { ok: true };
+  const result = await executeTool(
+    db,
+    {
+      tool,
+      input,
+      context: { actor: "agent" }
+    },
+    toolRegistry
+  );
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, result: result.result };
 }
 
 async function completeCodexOauth(
@@ -885,6 +888,7 @@ app.post("/chat/messages", async ({ body }) => {
     chatSessionId: sessionId,
     chatRequestId: requestId,
     handlerNames: Array.from(toolRegistry.handlers.keys()),
+    invokeRuntimeTool: invokeRegisteredToolAsAgent,
     onControlPlaneChanged: async () => {
       await rebuildRuntimeState();
     }
@@ -953,6 +957,7 @@ app.post("/chat/stream", async ({ body }) => {
     chatSessionId: undefined as number | undefined,
     chatRequestId: requestId,
     handlerNames: Array.from(toolRegistry.handlers.keys()),
+    invokeRuntimeTool: invokeRegisteredToolAsAgent,
     onControlPlaneChanged: async () => {
       await rebuildRuntimeState();
     }
@@ -1651,95 +1656,6 @@ app.get("/tools/registry", () => ({
   warnings: toolRegistry.warnings
 }));
 
-app.get("/connectors/gmail/status", () => {
-  const accessToken = getSecretRef(db, "gmail.access_token");
-  const refreshToken = getSecretRef(db, "gmail.refresh_token");
-  return {
-    ok: true,
-    connected: Boolean(accessToken),
-    tokenSource: accessToken ? accessToken.provider : null,
-    refreshConfigured: Boolean(refreshToken)
-  };
-});
-
-app.post("/connectors/gmail/token", ({ body }) => {
-  const payload = asObject(body);
-  const accessToken =
-    typeof payload.accessToken === "string" ? payload.accessToken.trim() : "";
-  if (!accessToken) return { ok: false, error: "accessToken_required" };
-  setSecretRef(db, {
-    name: "gmail.access_token",
-    value: accessToken,
-    provider: "manual"
-  });
-  process.env.OPENCORPO_GMAIL_ACCESS_TOKEN = accessToken;
-  if (typeof payload.refreshToken === "string" && payload.refreshToken.trim()) {
-    setSecretRef(db, {
-      name: "gmail.refresh_token",
-      value: payload.refreshToken.trim(),
-      provider: "manual"
-    });
-    process.env.OPENCORPO_GMAIL_REFRESH_TOKEN = payload.refreshToken.trim();
-  }
-  writeAudit(db, { actor: "user", action: "gmail_token_saved" });
-  writeEvent(db, { type: "connector.gmail.connected", data: { source: "manual" } });
-  return { ok: true };
-});
-
-app.get("/connectors/gmail/oauth/start", () => {
-  const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
-  if (!clientId) {
-    return { ok: false, error: "google_client_id_missing" };
-  }
-  const redirectUri =
-    process.env.OPENCORPO_GMAIL_REDIRECT_URI ??
-    `http://127.0.0.1:${daemonPort}/oauth/google/callback`;
-  const scope = encodeURIComponent(
-    [
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.modify",
-      "https://www.googleapis.com/auth/gmail.compose",
-      "https://www.googleapis.com/auth/gmail.send"
-    ].join(" ")
-  );
-  const authUrl =
-    "https://accounts.google.com/o/oauth2/v2/auth" +
-    `?client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&response_type=code` +
-    `&access_type=offline` +
-    `&prompt=consent` +
-    `&scope=${scope}`;
-  return {
-    ok: true,
-    authUrl,
-    redirectUri
-  };
-});
-
-app.get("/oauth/google/callback", async ({ query, set }) => {
-  const code = typeof query?.code === "string" ? query.code : "";
-  const redirectUri =
-    process.env.OPENCORPO_GMAIL_REDIRECT_URI ??
-    `http://127.0.0.1:${daemonPort}/oauth/google/callback`;
-  if (!code) {
-    set.status = 400;
-    return {
-      ok: false,
-      error: "missing_oauth_code"
-    };
-  }
-  const result = await exchangeGoogleCodeForToken(code, redirectUri);
-  if (!result.ok) {
-    set.status = 400;
-    return result;
-  }
-  return {
-    ok: true,
-    message: "Gmail connected. You can return to OpenCorpo."
-  };
-});
-
 app.get("/connectors/codex/status", () => {
   const codex = getCodexTokenState();
   return {
@@ -1913,6 +1829,57 @@ app.post("/settings/script-execution-mode", ({ body }) => {
     data: { previous, next: mode }
   });
   return { ok: true, mode };
+});
+
+app.get("/settings/mcp", () => {
+  const raw = getSecretValue(db, "mcp.settings");
+  const settings = parseMcpSettingsFromSecret(raw);
+  return {
+    ok: true,
+    settings
+  };
+});
+
+app.post("/settings/mcp", async ({ body }) => {
+  const payload = asObject(body);
+  const providedSettings = payload.settings ?? payload;
+  const settings = normalizeMcpSettings(providedSettings);
+  if (!Array.isArray(settings.servers) || settings.servers.length === 0) {
+    return { ok: false, error: "mcp_server_required" };
+  }
+  const selected = settings.servers.find(
+    (server) => server.id === settings.webSearch.serverId
+  );
+  if (!selected) {
+    return { ok: false, error: "mcp_web_search_server_missing" };
+  }
+  if (!selected.enabled) {
+    return { ok: false, error: "mcp_web_search_server_disabled" };
+  }
+  setSecretRef(db, {
+    name: "mcp.settings",
+    value: JSON.stringify(settings),
+    provider: "local_file"
+  });
+  process.env.OPENCORPO_MCP_SETTINGS = JSON.stringify(settings);
+  writeAudit(db, {
+    actor: "user",
+    action: "mcp_settings_saved",
+    metadata: {
+      serverCount: settings.servers.length,
+      webSearchServerId: settings.webSearch.serverId,
+      webSearchToolName: settings.webSearch.toolName
+    }
+  });
+  writeEvent(db, {
+    type: "settings.mcp.updated",
+    data: {
+      serverCount: settings.servers.length,
+      webSearchServerId: settings.webSearch.serverId
+    }
+  });
+  await rebuildRuntimeState();
+  return { ok: true, settings };
 });
 
 app.get("/secrets/ai-key/status", () => {

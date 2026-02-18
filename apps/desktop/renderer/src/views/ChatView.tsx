@@ -10,6 +10,7 @@ import EmojiPicker, { Theme } from "emoji-picker-react";
 import { HexColorInput, HexColorPicker } from "react-colorful";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -376,6 +377,7 @@ export function ChatView() {
       apply_control_plane_change: "Applying config change",
       propose_code_change: "Preparing code patch"
     };
+    if (tool.startsWith("mcp.")) return `Calling ${tool}`;
     return map[tool] ?? `Running ${tool}`;
   };
 
@@ -656,7 +658,7 @@ export function ChatView() {
                 >
                   {message.role === "assistant" ? (
                     <div className="oc-markdown">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                         {message.content}
                       </ReactMarkdown>
                     </div>

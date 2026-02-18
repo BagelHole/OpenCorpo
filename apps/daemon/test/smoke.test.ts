@@ -22,7 +22,7 @@ describe("daemon smoke", () => {
 
     const grant = createCapabilityGrant(db, {
       actor: "test",
-      capabilities: ["gmail.read"],
+      capabilities: ["web.search"],
       ttlSeconds: 30
     });
     const found = getGrantByToken(db, grant.token);

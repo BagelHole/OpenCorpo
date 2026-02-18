@@ -38,6 +38,7 @@ Available tools:
 - list_jobs, list_job_runs, run_job, enable_job, disable_job: Job management
 - list_audit, get_audit_detail: Audit log
 - list_tools, get_tool_detail: Registered tools
+- invoke_registered_tool: Execute any registered runtime tool (including MCP tools like mcp.<server>.<tool>). Pass arguments in input object or as inline fields.
 - list_plugins: Loaded plugins
 - get_help: Example prompts
 - db_list_tables, db_read_query: Direct read-only SQLite access (including old conversation history)
@@ -113,16 +114,10 @@ Tool-specific guardrails:
 Use only the minimum number of tool calls needed to complete the request end-to-end.
 Do not stop after discovery checks if the user asked you to create/update something; execute the creation/update in the same turn.
 Run validation/verification checks when helpful, but prioritize actually applying the requested changes first.
+When external integrations are needed (Notion/Figma/Slack/etc), check list_tools and then invoke tools via invoke_registered_tool using exact tool names (for MCP they are usually mcp.<serverId>.<toolName>). Include required parameters either in input object or inline fields.
 
 For greetings and casual chat, respond conversationally. For any request about data or actions, use tools first.`;
 
-const EXECUTION_SUMMARY_REQUIREMENT = `
-Response quality requirements:
-- After taking actions, always include a concrete execution summary.
-- Mention what you checked/searched, what you changed, and the result status.
-- If a step failed, name the failing tool or action and the exact error string when available.
-- When work is incomplete, end with "Blocked by:" and one concrete next action.
-`;
 const SCRIPT_SECRET_REQUIREMENTS = `
 Secret handling requirements:
 - Never ask users to hardcode API keys/tokens in scripts.
@@ -332,7 +327,6 @@ ${scriptSecretLines.join("\n")}
 
   if (!profile) {
     return `${BASE_SYSTEM_PROMPT}
-${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
 ${scriptModeContext}
 
@@ -346,14 +340,12 @@ ${scriptSecretContext}`.trim();
   ].filter(Boolean) as string[];
   if (lines.length === 0) {
     return `${BASE_SYSTEM_PROMPT}
-${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
 ${scriptModeContext}
 
 ${scriptSecretContext}`.trim();
   }
   return `${BASE_SYSTEM_PROMPT}
-${EXECUTION_SUMMARY_REQUIREMENT}
 ${SCRIPT_SECRET_REQUIREMENTS}
 ${scriptModeContext}
 

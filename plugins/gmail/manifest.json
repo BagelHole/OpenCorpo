@@ -1,7 +1,0 @@
-{
-  "name": "gmail",
-  "version": "0.0.1",
-  "permissions": ["gmail.read", "gmail.send"],
-  "tools": ["gmail.search", "gmail.read", "gmail.draft", "gmail.send"],
-  "entry": "handler.ts"
-}

@@ -69,7 +69,7 @@ OpenCorpo consists of two local processes:
 
 1) Desktop app (Electron + React UI)
    - chat, jobs, CRM, approvals, audit viewer
-   - OAuth flows (Gmail)
+   - OAuth flows (Codex)
    - system tray + lifecycle
    - starts and authenticates the daemon
 
@@ -201,7 +201,6 @@ opencorpo/
     plugin-sdk/              # plugin interfaces
     ui-kit/
   plugins/
-    gmail/
   config/                    # CONTROL PLANE (AI-editable)
     policy.json
     tools/
@@ -278,7 +277,7 @@ Audit entries are never mutated or deleted.
 
 Plugins provide:
 
-- connectors (Gmail first)
+- connectors (MCP + plugins)
 - tools callable by the agent
 - background sync jobs
 
@@ -293,20 +292,15 @@ All plugins:
 - are capability-gated
 - are audited
 
-## First connector: Gmail
+## Connectors and MCP
 
-Gmail responsibilities:
+OpenCorpo supports external tools through MCP servers and plugins.
 
-- OAuth authentication
-- incremental sync
-- emit events for messages and threads
+Examples:
 
-Gmail tools:
-
-- gmail.search
-- gmail.read
-- gmail.draft
-- gmail.send (high-risk, approval required)
+- Exa MCP for web search
+- Notion/Figma/Slack MCP servers
+- custom internal MCP servers
 
 ## Jobs and scheduled automations
 
@@ -401,10 +395,6 @@ HTTP:
 - POST /code/changes/propose
 - POST /code/changes/:id/reject
 - POST /code/changes/:id/apply
-- GET /connectors/gmail/status
-- POST /connectors/gmail/token
-- GET /connectors/gmail/oauth/start
-- GET /oauth/google/callback
 - GET /connectors/codex/status
 - GET /connectors/codex/oauth/start
 - GET /oauth/openai/callback
@@ -425,7 +415,8 @@ SSE:
 A user can:
 
 - run OpenCorpo locally
-- connect Gmail
+- connect an AI provider
+- add MCP servers
 - ask AI questions
 - approve AI actions
 - let AI create daily jobs
@@ -448,7 +439,6 @@ The desktop shell and daemon both live in this repository under `apps/desktop` a
 ## Immediate next steps (coding agent)
 
 - harden production packaging with bundled Bun runtime
-- finish OAuth polish + token refresh handling for Gmail
 - expand planner/worker intelligence for long-running tasks
 - add richer workspace patch diff previews in desktop UI
 - complete release channel automation (stable/beta/dev)

@@ -4,7 +4,7 @@ This is the long-horizon build list. It is intentionally large and broken into p
 
 ## Progress (last updated: 2026-02-01)
 - Completed: root workspace setup, daemon core scaffold, approvals/jobs/tools loop, Control Plane validation, SSE stream, plugin loader, and Electron desktop UI shell.
-- In progress: UI wiring depth (details, schedules, approvals), job scheduling fidelity, Gmail connector real API integration.
+- In progress: UI wiring depth (details, schedules, approvals), job scheduling fidelity, MCP tool/integration depth.
 
 ## Phase 0 - Foundations
 - [x] [MVP] Decide repo tooling: Bun workspaces or plain pnpm
@@ -62,7 +62,6 @@ This is the long-horizon build list. It is intentionally large and broken into p
 ## Phase 5 - Plugins + Tools
 - [x] [MVP] Plugin manifest + loader
 - [x] [MVP] Tool handler registration
-- [x] [MVP] Gmail connector skeleton
 - [ ] Add plugin signing + verification (enterprise mode)
 - [ ] Add plugin permission prompts
 - [x] Add tool metadata registry endpoints
@@ -75,7 +74,6 @@ This is the long-horizon build list. It is intentionally large and broken into p
 - [x] [MVP] Approvals inbox
 - [x] [MVP] Jobs view
 - [x] [MVP] Audit log viewer
-- Add OAuth flows (Gmail)
 - Add UI for Control Plane validation errors
 - Add UI for policies + capabilities
 - Add UI for workflows + schedules

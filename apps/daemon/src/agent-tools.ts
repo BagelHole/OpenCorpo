@@ -628,12 +628,145 @@ export function buildAgentTools(context: AgentContext) {
     get_tool_detail: tool({
       description: "Get details of a specific tool by name.",
       inputSchema: z.object({ tool_name: z.string() }),
-      execute: withToolTelemetry(context, "get_tool_detail", async ({ tool_name }) =>
-        handleToolDetail(context.tools, tool_name).text)
+      execute: async ({ tool_name }) => {
+        const telemetryTool = tool_name?.trim() || "get_tool_detail";
+        const startedAt = new Date().toISOString();
+        emitToolEvent(context, {
+          phase: "started",
+          tool: telemetryTool,
+          at: startedAt,
+          requestId: context.chatRequestId,
+          sessionId: context.chatSessionId,
+          inputPreview: toPreview({ tool_name })
+        });
+        try {
+          const output = handleToolDetail(context.tools, tool_name).text;
+          emitToolEvent(context, {
+            phase: "completed",
+            tool: telemetryTool,
+            at: new Date().toISOString(),
+            requestId: context.chatRequestId,
+            sessionId: context.chatSessionId,
+            outputPreview: toPreview(output)
+          });
+          return output;
+        } catch (error) {
+          emitToolEvent(context, {
+            phase: "failed",
+            tool: telemetryTool,
+            at: new Date().toISOString(),
+            requestId: context.chatRequestId,
+            sessionId: context.chatSessionId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
+      }
+    }),
+
+    invoke_registered_tool: tool({
+      description:
+        "Invoke any registered runtime tool by exact name (including MCP tools like mcp.<serverId>.<toolName>). Pass params either in `input` object or as inline fields.",
+      inputSchema: z.object({
+        tool_name: z.string().min(1),
+        input: z.record(z.unknown()).optional()
+      }).passthrough(),
+      execute: async (rawArgs) => {
+        const args = rawArgs as {
+          tool_name: string;
+          input?: Record<string, unknown>;
+          [key: string]: unknown;
+        };
+        const toolName = args.tool_name?.trim();
+        const telemetryTool = toolName || "invoke_registered_tool";
+        const inlineInput = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== "tool_name" && key !== "input")
+        ) as Record<string, unknown>;
+        const explicitInput =
+          args.input && typeof args.input === "object" && !Array.isArray(args.input)
+            ? args.input
+            : {};
+        const mergedInput = { ...inlineInput, ...explicitInput };
+
+        emitToolEvent(context, {
+          phase: "started",
+          tool: telemetryTool,
+          at: new Date().toISOString(),
+          requestId: context.chatRequestId,
+          sessionId: context.chatSessionId,
+          inputPreview: toPreview(mergedInput)
+        });
+        try {
+          if (!context.invokeRuntimeTool) {
+            const unavailable = {
+              ok: false,
+              error: "runtime_tool_invocation_unavailable"
+            };
+            emitToolEvent(context, {
+              phase: "failed",
+              tool: telemetryTool,
+              at: new Date().toISOString(),
+              requestId: context.chatRequestId,
+              sessionId: context.chatSessionId,
+              error: unavailable.error
+            });
+            return unavailable;
+          }
+          if (!toolName) {
+            const missing = {
+              ok: false,
+              error: "tool_name_required"
+            };
+            emitToolEvent(context, {
+              phase: "failed",
+              tool: telemetryTool,
+              at: new Date().toISOString(),
+              requestId: context.chatRequestId,
+              sessionId: context.chatSessionId,
+              error: missing.error
+            });
+            return missing;
+          }
+          const result = await context.invokeRuntimeTool(toolName, mergedInput);
+          const output = result.ok
+            ? {
+                ok: true,
+                tool: toolName,
+                result: result.result
+              }
+            : {
+                ok: false,
+                tool: toolName,
+                error: result.error,
+                approvalRequired: result.approvalRequired ?? false,
+                approvalId: result.approvalId ?? null
+              };
+          emitToolEvent(context, {
+            phase: result.ok ? "completed" : "failed",
+            tool: telemetryTool,
+            at: new Date().toISOString(),
+            requestId: context.chatRequestId,
+            sessionId: context.chatSessionId,
+            outputPreview: result.ok ? toPreview(output) : undefined,
+            error: result.ok ? undefined : result.error
+          });
+          return output;
+        } catch (error) {
+          emitToolEvent(context, {
+            phase: "failed",
+            tool: telemetryTool,
+            at: new Date().toISOString(),
+            requestId: context.chatRequestId,
+            sessionId: context.chatSessionId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
+      }
     }),
 
     list_plugins: tool({
-      description: "List loaded plugins. Use when user asks about plugins, integrations, Gmail, connectors.",
+      description: "List loaded plugins. Use when user asks about plugins, integrations, or connectors.",
       inputSchema: z.object({}),
       execute: withToolTelemetry(context, "list_plugins", async () => buildPluginsList(context.plugins))
     }),

@@ -12,6 +12,7 @@ import type {
   AiProviderCatalog,
   Approval,
   AuditEntry,
+  McpSettings,
   ScriptExecutionMode,
   ScriptSecretItem,
   Job,
@@ -28,7 +29,6 @@ export type OnboardingData = {
   completed: boolean;
   aiProvider: "anthropic" | "openai" | "local" | "codex";
   aiKey: string;
-  gmailAccessToken: string;
   profile: UserProfile;
 };
 
@@ -86,13 +86,22 @@ export type DaemonStatus = {
   lastError: string | null;
 };
 
-export type GmailStatus = {
-  connected: boolean;
-  tokenSource: string | null;
-  refreshConfigured: boolean;
-};
-
 export type CodexConnectionStatus = CodexStatus;
+const DEFAULT_MCP_SETTINGS: McpSettings = {
+  servers: [
+    {
+      id: "exa",
+      name: "Exa Remote",
+      url: "https://mcp.exa.ai/mcp",
+      headers: {},
+      enabled: true
+    }
+  ],
+  webSearch: {
+    serverId: "exa",
+    toolName: "web_search_exa"
+  }
+};
 
 const EMPTY_AI_PROVIDER_CATALOG: AiProviderCatalog = {
   defaultProvider: null,
@@ -283,6 +292,12 @@ function createChatRequestId() {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function streamAgentProgressEvents(input: {
   apiBase: string;
   token: string;
@@ -365,7 +380,6 @@ function readOnboarding(): OnboardingData {
         completed: false,
         aiProvider: "codex",
         aiKey: "",
-        gmailAccessToken: "",
         profile: {
           name: "",
           role: "",
@@ -384,7 +398,6 @@ function readOnboarding(): OnboardingData {
           ? parsed.aiProvider
           : "codex",
       aiKey: parsed.aiKey ?? "",
-      gmailAccessToken: parsed.gmailAccessToken ?? "",
       profile: {
         name: parsed.profile?.name ?? "",
         role: parsed.profile?.role ?? "",
@@ -397,7 +410,6 @@ function readOnboarding(): OnboardingData {
       completed: false,
       aiProvider: "codex",
       aiKey: "",
-      gmailAccessToken: "",
       profile: {
         name: "",
         role: "",
@@ -425,7 +437,7 @@ type OpenCorpoContextValue = {
   aiModelDefaults: AiModelDefaults;
   scriptSecrets: ScriptSecretItem[];
   scriptExecutionMode: ScriptExecutionMode;
-  gmailStatus: GmailStatus;
+  mcpSettings: McpSettings;
   codexStatus: CodexConnectionStatus;
   aiProviderCatalog: AiProviderCatalog;
   uiConfig: UiConfig;
@@ -449,6 +461,7 @@ type OpenCorpoContextValue = {
     description?: string;
   }) => Promise<void>;
   saveScriptExecutionMode: (mode: ScriptExecutionMode) => Promise<void>;
+  saveMcpSettings: (settings: McpSettings) => Promise<void>;
   refreshChatSessions: () => Promise<void>;
   createChatSession: (input?: {
     title?: string;
@@ -465,11 +478,9 @@ type OpenCorpoContextValue = {
     content: string,
     options?: { onAgentProgress?: (event: AgentProgressEvent) => void }
   ) => Promise<void>;
-  saveGmailToken: (token: string) => Promise<void>;
   saveAiKey: (key: string) => Promise<void>;
   saveAiProvider: (provider: string) => Promise<void>;
   checkAiKeyConfigured: () => Promise<boolean>;
-  getGmailOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   getCodexOauthStart: () => Promise<{ ok: boolean; authUrl?: string; error?: string }>;
   disconnectCodex: () => Promise<void>;
   updateApproval: (id: number, action: "approve" | "deny") => Promise<void>;
@@ -517,11 +528,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   });
   const [scriptSecrets, setScriptSecrets] = useState<ScriptSecretItem[]>([]);
   const [scriptExecutionMode, setScriptExecutionMode] = useState<ScriptExecutionMode>("safe");
-  const [gmailStatus, setGmailStatus] = useState<GmailStatus>({
-    connected: false,
-    tokenSource: null,
-    refreshConfigured: false,
-  });
+  const [mcpSettings, setMcpSettings] = useState<McpSettings>(DEFAULT_MCP_SETTINGS);
   const [codexStatus, setCodexStatus] = useState<CodexConnectionStatus>({
     connected: false,
     provider: null,
@@ -628,12 +635,13 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProfileAndModels = useCallback(async (client: OpenCorpoApi) => {
-    const [profileRes, modelRes, providerRes, scriptSecretsRes, scriptModeRes] = await Promise.all([
+    const [profileRes, modelRes, providerRes, scriptSecretsRes, scriptModeRes, mcpSettingsRes] = await Promise.all([
       client.getProfile(),
       client.getAiModelDefaults(),
       client.getAiProviderCatalog(),
       client.getScriptSecrets(),
       client.getScriptExecutionMode(),
+      client.getMcpSettings()
     ]);
     if (profileRes.ok) {
       setProfile(profileRes.data.profile);
@@ -658,6 +666,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     if (scriptModeRes.ok) {
       setScriptExecutionMode(scriptModeRes.data.mode ?? "safe");
     }
+    if (mcpSettingsRes.ok) {
+      setMcpSettings(mcpSettingsRes.data.settings ?? DEFAULT_MCP_SETTINGS);
+    }
   }, []);
 
   const refreshDaemonStatus = useCallback(async () => {
@@ -670,7 +681,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     try {
       const runtime = await window.opencorpo.daemon.getRuntimeConfig();
       // `runtime.apiBase` can be intentionally empty in dev to use the Vite proxy.
-      const base = runtime.apiBase ?? `http://127.0.0.1:3555`;
+      const base = runtime.apiBase?.trim() || `http://127.0.0.1:3555`;
       setApiBase(base);
       setLaunchToken(runtime.launchToken);
       const status = await window.opencorpo.daemon.getStatus();
@@ -685,11 +696,24 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const createFreshApiClient = useCallback(async () => {
+    if (!window.opencorpo?.daemon) return null;
+    try {
+      const runtime = await window.opencorpo.daemon.getRuntimeConfig();
+      const base = runtime.apiBase?.trim() || "http://127.0.0.1:3555";
+      const token = runtime.launchToken?.trim();
+      if (!token) return null;
+      return new OpenCorpoApi(base, () => token);
+    } catch {
+      return null;
+    }
+  }, []);
+
   const refreshData = useCallback(async () => {
     const currentApi = apiRef.current;
     if (!currentApi || !daemonStatus.ready) return;
     try {
-      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, gmailRes, codexRes, uiRes] =
+      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, codexRes, uiRes] =
         await Promise.all([
           currentApi.listApprovals(),
           currentApi.listJobs(),
@@ -697,7 +721,6 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           currentApi.listAudit(30),
           currentApi.listPlugins(),
           currentApi.listTools(),
-          currentApi.getGmailStatus(),
           currentApi.getCodexStatus(),
           currentApi.getUiConfig(),
         ]);
@@ -708,13 +731,6 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       if (auditRes.ok) setAudit(auditRes.data.items ?? []);
       if (pluginsRes.ok) setPlugins(pluginsRes.data.items ?? []);
       if (toolsRes.ok) setTools(toolsRes.data.items ?? []);
-      if (gmailRes.ok) {
-        setGmailStatus({
-          connected: gmailRes.data.connected,
-          tokenSource: gmailRes.data.tokenSource,
-          refreshConfigured: gmailRes.data.refreshConfigured,
-        });
-      }
       if (codexRes.ok) {
         setCodexStatus({
           connected: codexRes.data.connected,
@@ -1064,16 +1080,6 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     persistOnboarding({ ...onboarding, completed: true });
   }, [onboarding, persistOnboarding]);
 
-  const saveGmailToken = useCallback(
-    async (token: string) => {
-      if (!api) throw new Error("API client is not ready yet. Please try again.");
-      const res = await api.saveGmailToken(token);
-      if (!res.ok) throw new Error(res.error);
-      await refreshData();
-    },
-    [api, refreshData]
-  );
-
   const saveAiKey = useCallback(
     async (key: string) => {
       if (!api) throw new Error("API client is not ready yet. Please try again.");
@@ -1197,16 +1203,34 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     [api]
   );
 
+  const saveMcpSettings = useCallback(
+    async (settings: McpSettings) => {
+      let currentApi = apiRef.current;
+      if (!currentApi) throw new Error("API client is not ready yet. Please try again.");
+      let res = await currentApi.saveMcpSettings(settings);
+      if (!res.ok && res.error.includes("(404)") && window.opencorpo?.daemon) {
+        await window.opencorpo.daemon.restart();
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          await delay(350);
+          await refreshDaemonStatus();
+          currentApi = (await createFreshApiClient()) ?? apiRef.current;
+          if (!currentApi) continue;
+          res = await currentApi.saveMcpSettings(settings);
+          if (res.ok || !res.error.includes("(404)")) {
+            break;
+          }
+        }
+      }
+      if (!res.ok) throw new Error(res.error);
+      setMcpSettings(res.data.settings ?? settings);
+    },
+    [createFreshApiClient, refreshDaemonStatus]
+  );
+
   const checkAiKeyConfigured = useCallback(async () => {
     if (!api) return false;
     const res = await api.getAiKeyStatus();
     return res.ok && res.data.configured;
-  }, [api]);
-
-  const getGmailOauthStart = useCallback(async () => {
-    if (!api) return { ok: false, error: "API client is not ready yet. Please try again." };
-    const res = await api.getGmailOauthStart();
-    return res.ok ? res.data : { ok: false, error: res.error };
   }, [api]);
 
   const getCodexOauthStart = useCallback(async () => {
@@ -1337,7 +1361,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       aiModelDefaults,
       scriptSecrets,
       scriptExecutionMode,
-      gmailStatus,
+      mcpSettings,
       codexStatus,
       aiProviderCatalog,
       uiConfig,
@@ -1356,6 +1380,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveAiModelDefaults,
       saveScriptSecret,
       saveScriptExecutionMode,
+      saveMcpSettings,
       refreshChatSessions,
       createChatSession,
       updateChatSession,
@@ -1363,11 +1388,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       reorderChatSessions,
       selectChatSession,
       sendChatMessage,
-      saveGmailToken,
       saveAiKey,
       saveAiProvider,
       checkAiKeyConfigured,
-      getGmailOauthStart,
       getCodexOauthStart,
       disconnectCodex,
       updateApproval,
@@ -1394,7 +1417,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       aiModelDefaults,
       scriptSecrets,
       scriptExecutionMode,
-      gmailStatus,
+      mcpSettings,
       codexStatus,
       aiProviderCatalog,
       uiConfig,
@@ -1413,6 +1436,7 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       saveAiModelDefaults,
       saveScriptSecret,
       saveScriptExecutionMode,
+      saveMcpSettings,
       refreshChatSessions,
       createChatSession,
       updateChatSession,
@@ -1420,11 +1444,9 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       reorderChatSessions,
       selectChatSession,
       sendChatMessage,
-      saveGmailToken,
       saveAiKey,
       saveAiProvider,
       checkAiKeyConfigured,
-      getGmailOauthStart,
       getCodexOauthStart,
       disconnectCodex,
       updateApproval,

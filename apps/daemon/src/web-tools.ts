@@ -1,3 +1,5 @@
+import { parseMcpSettingsFromSecret } from "./mcp-settings";
+
 const BLOCKED_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
@@ -108,86 +110,214 @@ type SearchResult = {
   snippet: string;
 };
 
-function stripHtml(input: string) {
-  return input
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
+type McpRpcResponse = {
+  ok: boolean;
+  result?: Record<string, unknown>;
+  error?: string;
+  sessionId?: string | null;
+};
+
+function toJsonObject(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
-function normalizeDuckDuckGoHref(rawHref: string) {
-  const href = rawHref.trim();
-  if (!href) return "";
+function tryParseJson(value: string): Record<string, unknown> | null {
   try {
-    const asUrl = new URL(href, "https://duckduckgo.com");
-    const uddg = asUrl.searchParams.get("uddg");
-    if (uddg) return decodeURIComponent(uddg);
-    return asUrl.toString();
+    const parsed = JSON.parse(value) as unknown;
+    return toJsonObject(parsed);
   } catch {
-    return href;
+    return null;
   }
 }
 
-function isUsefulResultUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === "duckduckgo.com" && parsed.pathname.startsWith("/y.js")) {
-      return false;
+function parseMcpBody(rawBody: string): Record<string, unknown> | null {
+  const trimmed = rawBody.trim();
+  if (!trimmed) return null;
+  const parsed = tryParseJson(trimmed);
+  if (parsed) return parsed;
+  const dataLines = trimmed
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter(Boolean);
+  for (let index = dataLines.length - 1; index >= 0; index -= 1) {
+    const sseParsed = tryParseJson(dataLines[index]);
+    if (sseParsed) return sseParsed;
+  }
+  return null;
+}
+
+async function callMcpRpc(input: {
+  url: string;
+  headers: Record<string, string>;
+  method: string;
+  params?: Record<string, unknown>;
+  sessionId?: string | null;
+}) {
+  const requestBody: Record<string, unknown> = {
+    jsonrpc: "2.0",
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    method: input.method
+  };
+  if (input.params) requestBody.params = input.params;
+
+  const response = await fetch(input.url, {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...(input.sessionId ? { "mcp-session-id": input.sessionId } : {}),
+      ...input.headers
+    },
+    body: JSON.stringify(requestBody)
+  });
+  const rawBody = await response.text();
+  const payload = parseMcpBody(rawBody);
+  const responseSessionId =
+    response.headers.get("mcp-session-id") ?? response.headers.get("Mcp-Session-Id");
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: payload?.error
+        ? JSON.stringify(payload.error)
+        : `mcp_http_${response.status}`,
+      sessionId: responseSessionId
+    } as McpRpcResponse;
+  }
+  if (!payload) {
+    return { ok: false, error: "mcp_invalid_json", sessionId: responseSessionId } as McpRpcResponse;
+  }
+  if (payload.error) {
+    return {
+      ok: false,
+      error: JSON.stringify(payload.error),
+      sessionId: responseSessionId
+    } as McpRpcResponse;
+  }
+  const result = toJsonObject(payload.result);
+  if (!result) {
+    return { ok: false, error: "mcp_result_missing", sessionId: responseSessionId } as McpRpcResponse;
+  }
+  return { ok: true, result, sessionId: responseSessionId } as McpRpcResponse;
+}
+
+async function initializeMcpSession(url: string, headers: Record<string, string>) {
+  const initialized = await callMcpRpc({
+    url,
+    headers,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: {
+        name: "OpenCorpo",
+        version: "0.0.2"
+      }
     }
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
+  });
+  if (!initialized.ok) return initialized;
+  const sessionId = initialized.sessionId ?? null;
+  await callMcpRpc({
+    url,
+    headers,
+    method: "notifications/initialized",
+    params: {},
+    sessionId
+  }).catch(() => null);
+  return { ok: true, sessionId } as const;
 }
 
-function parseDuckDuckGoHtmlResults(html: string, maxResults: number): SearchResult[] {
+function normalizeSearchRow(row: Record<string, unknown>): SearchResult | null {
+  const titleCandidates = [row.title, row.name, row.headline];
+  const urlCandidates = [row.url, row.link, row.href, row.id];
+  const snippetCandidates = [row.snippet, row.text, row.summary, row.description];
+  const title = titleCandidates.find((item) => typeof item === "string" && item.trim()) as
+    | string
+    | undefined;
+  const url = urlCandidates.find((item) => typeof item === "string" && item.trim()) as
+    | string
+    | undefined;
+  const snippet = snippetCandidates.find((item) => typeof item === "string" && item.trim()) as
+    | string
+    | undefined;
+  if (!title || !url) return null;
+  return {
+    title: title.trim(),
+    url: url.trim(),
+    snippet: snippet ? snippet.trim() : ""
+  };
+}
+
+function parseExaTextResults(text: string, maxResults: number): SearchResult[] {
+  const pattern =
+    /Title:\s*(.+?)\r?\n(?:Published Date:.*\r?\n)?URL:\s*(https?:\/\/\S+)\r?\nText:\s*([\s\S]*?)(?=\r?\nTitle:\s*|$)/g;
   const results: SearchResult[] = [];
-  const blockRegex =
-    /<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
-  const blocks = html.match(blockRegex) ?? [];
-  for (const block of blocks) {
-    const anchorMatch = block.match(
-      /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i
-    );
-    if (!anchorMatch) continue;
-    const url = normalizeDuckDuckGoHref(anchorMatch[1]);
-    const title = stripHtml(anchorMatch[2]);
-    if (!url || !title || !isUsefulResultUrl(url)) continue;
-    const snippetMatch = block.match(
-      /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i
-    );
-    const snippet = stripHtml(snippetMatch?.[1] ?? snippetMatch?.[2] ?? "");
-    if (results.some((item) => item.url === url)) continue;
-    results.push({ title, url, snippet });
-    if (results.length >= maxResults) break;
+  let match: RegExpExecArray | null = pattern.exec(text);
+  while (match) {
+    const title = match[1]?.trim() ?? "";
+    const url = match[2]?.trim() ?? "";
+    const snippet = (match[3] ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+    if (title && url && !results.some((item) => item.url === url)) {
+      results.push({ title, url, snippet });
+      if (results.length >= maxResults) break;
+    }
+    match = pattern.exec(text);
   }
   return results;
 }
 
-function pushRelated(results: SearchResult[], topics: unknown) {
-  if (!Array.isArray(topics)) return;
-  for (const item of topics) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as Record<string, unknown>;
-    if (Array.isArray(row.Topics)) {
-      pushRelated(results, row.Topics);
-      continue;
-    }
-    const text = typeof row.Text === "string" ? row.Text : "";
-    const firstUrl = typeof row.FirstURL === "string" ? row.FirstURL : "";
-    if (!text || !firstUrl) continue;
-    if (results.some((result) => result.url === firstUrl)) continue;
-    results.push({
-      title: text.split(" - ")[0] || text,
-      url: firstUrl,
-      snippet: text
-    });
+function extractSearchResultsFromMcpResult(result: Record<string, unknown>, maxResults: number) {
+  const candidates: unknown[] = [];
+  const textCandidates: string[] = [];
+  const structuredContent = toJsonObject(result.structuredContent);
+  if (structuredContent?.results && Array.isArray(structuredContent.results)) {
+    candidates.push(...structuredContent.results);
   }
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      const row = toJsonObject(item);
+      if (!row) continue;
+      if (row.type === "json" && row.json) candidates.push(row.json);
+      if (row.type === "text" && typeof row.text === "string") {
+        const parsed = tryParseJson(row.text);
+        if (parsed) candidates.push(parsed);
+        textCandidates.push(row.text);
+      }
+    }
+  }
+  const flattened: unknown[] = [];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) flattened.push(...candidate);
+    else if (toJsonObject(candidate)?.results && Array.isArray(toJsonObject(candidate)?.results)) {
+      flattened.push(...((toJsonObject(candidate)?.results as unknown[]) ?? []));
+    } else {
+      flattened.push(candidate);
+    }
+  }
+
+  const results: SearchResult[] = [];
+  for (const candidate of flattened) {
+    const row = toJsonObject(candidate);
+    if (!row) continue;
+    const normalized = normalizeSearchRow(row);
+    if (!normalized) continue;
+    if (results.some((item) => item.url === normalized.url)) continue;
+    results.push(normalized);
+    if (results.length >= maxResults) break;
+  }
+  if (results.length < maxResults) {
+    for (const text of textCandidates) {
+      const parsedRows = parseExaTextResults(text, maxResults - results.length);
+      for (const row of parsedRows) {
+        if (results.some((item) => item.url === row.url)) continue;
+        results.push(row);
+        if (results.length >= maxResults) break;
+      }
+      if (results.length >= maxResults) break;
+    }
+  }
+  return results;
 }
 
 export async function runWebSearch(input: {
@@ -203,103 +333,88 @@ export async function runWebSearch(input: {
       ? Math.max(1, Math.min(10, Math.floor(input.maxResults)))
       : 5;
 
-  const searchDuckDuckGo = async (searchQuery: string) => {
-    const url = new URL("https://api.duckduckgo.com/");
-    url.searchParams.set("q", searchQuery);
-    url.searchParams.set("format", "json");
-    url.searchParams.set("no_html", "1");
-    url.searchParams.set("skip_disambig", "1");
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "user-agent": "OpenCorpo/0.0.2 (+local-agent)"
-      }
-    });
-    if (!response.ok) {
-      return { ok: false as const, error: `search_failed:${response.status}` };
-    }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-    const results: SearchResult[] = [];
-
-    const abstractText = typeof payload.AbstractText === "string" ? payload.AbstractText : "";
-    const abstractUrl = typeof payload.AbstractURL === "string" ? payload.AbstractURL : "";
-    const heading = typeof payload.Heading === "string" ? payload.Heading : "";
-    if (abstractText && abstractUrl) {
-      results.push({
-        title: heading || searchQuery,
-        url: abstractUrl,
-        snippet: abstractText
-      });
-    }
-
-    pushRelated(results, payload.RelatedTopics);
-    return { ok: true as const, results: results.slice(0, maxResults) };
-  };
-
-  const searchDuckDuckGoHtml = async (searchQuery: string) => {
-    const url = new URL("https://duckduckgo.com/html/");
-    url.searchParams.set("q", searchQuery);
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "user-agent": "OpenCorpo/0.0.2 (+local-agent)"
-      }
-    });
-    if (!response.ok) {
-      return { ok: false as const, error: `search_html_failed:${response.status}` };
-    }
-    const html = await response.text();
-    return { ok: true as const, results: parseDuckDuckGoHtmlResults(html, maxResults) };
-  };
-
-  const relaxedQuery = query
-    .replace(/\bsite:[^\s)]+/gi, "")
-    .replace(/\bOR\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
   try {
-    const primary = await searchDuckDuckGo(query);
-    if (!primary.ok) {
-      return { ok: false, error: primary.error };
+    const mcpSettings = parseMcpSettingsFromSecret(process.env.OPENCORPO_MCP_SETTINGS);
+    const server = mcpSettings.servers.find(
+      (entry) => entry.id === mcpSettings.webSearch.serverId && entry.enabled
+    );
+    if (!server) {
+      return { ok: false, error: "mcp_server_missing" };
     }
-    let results = primary.results;
-    let fallbackUsed = false;
-    if (
-      results.length === 0 &&
-      relaxedQuery &&
-      relaxedQuery.toLowerCase() !== query.toLowerCase()
-    ) {
-      const secondary = await searchDuckDuckGo(relaxedQuery);
-      if (secondary.ok && secondary.results.length > 0) {
-        results = secondary.results;
-        fallbackUsed = true;
+    const init = await initializeMcpSession(server.url, server.headers);
+    if (!init.ok) {
+      return { ok: false, error: init.error ?? "mcp_initialize_failed" };
+    }
+    const toolArgsCandidates: Record<string, unknown>[] = [
+      { query, numResults: maxResults },
+      { query, maxResults },
+      { q: query, limit: maxResults }
+    ];
+
+    let response: McpRpcResponse | null = null;
+    for (const args of toolArgsCandidates) {
+      const attempt = await callMcpRpc({
+        url: server.url,
+        headers: server.headers,
+        method: "tools/call",
+        sessionId: init.sessionId,
+        params: {
+          name: mcpSettings.webSearch.toolName,
+          arguments: args
+        }
+      });
+      if (attempt.ok) {
+        response = attempt;
+        break;
       }
+      response = attempt;
     }
-    if (results.length === 0) {
-      const htmlPrimary = await searchDuckDuckGoHtml(query);
-      if (htmlPrimary.ok && htmlPrimary.results.length > 0) {
-        results = htmlPrimary.results;
-      } else if (
-        relaxedQuery &&
-        relaxedQuery.toLowerCase() !== query.toLowerCase()
-      ) {
-        const htmlSecondary = await searchDuckDuckGoHtml(relaxedQuery);
-        if (htmlSecondary.ok && htmlSecondary.results.length > 0) {
-          results = htmlSecondary.results;
-          fallbackUsed = true;
+    if (!response || !response.ok || !response.result) {
+      const listed = await callMcpRpc({
+        url: server.url,
+        headers: server.headers,
+        method: "tools/list",
+        sessionId: init.sessionId
+      });
+      if (listed.ok && listed.result && Array.isArray(listed.result.tools)) {
+        const discoveredTool = listed.result.tools
+          .map((item) =>
+            item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string"
+              ? ((item as { name: string }).name ?? "").trim()
+              : ""
+          )
+          .find((name) => /search/i.test(name));
+        if (discoveredTool) {
+          for (const args of toolArgsCandidates) {
+            const attempt = await callMcpRpc({
+              url: server.url,
+              headers: server.headers,
+              method: "tools/call",
+              sessionId: init.sessionId,
+              params: {
+                name: discoveredTool,
+                arguments: args
+              }
+            });
+            if (attempt.ok) {
+              response = attempt;
+              break;
+            }
+            response = attempt;
+          }
         }
       }
     }
+    if (!response || !response.ok || !response.result) {
+      return { ok: false, error: response?.error ?? "mcp_tool_call_failed" };
+    }
 
+    const results = extractSearchResultsFromMcpResult(response.result, maxResults);
     return {
       ok: true,
       query,
       results,
-      relaxedQuery: fallbackUsed ? relaxedQuery : undefined,
-      source: "duckduckgo"
+      source: `mcp:${server.id}`
     };
   } catch (error) {
     return {
