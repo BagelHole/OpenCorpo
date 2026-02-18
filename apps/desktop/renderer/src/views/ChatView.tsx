@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type WheelEvent,
 } from "react";
 import EmojiPicker, { Theme } from "emoji-picker-react";
@@ -224,17 +225,21 @@ export function ChatView() {
 
   useEffect(() => {
     if (!tabMenu) return;
+    const isWithinTabStrip = (target: Node | null) =>
+      Boolean(tabStripRef.current && target && tabStripRef.current.contains(target));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTabMenu(null);
     };
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
+      if (isWithinTabStrip(target)) return;
       if (tabMenuRef.current && target && !tabMenuRef.current.contains(target)) {
         setTabMenu(null);
       }
     };
     const onContextMenu = (event: MouseEvent) => {
       const target = event.target as Node | null;
+      if (isWithinTabStrip(target)) return;
       if (tabMenuRef.current && target && !tabMenuRef.current.contains(target)) {
         setTabMenu(null);
       }
@@ -313,6 +318,16 @@ export function ChatView() {
     moveSessionBefore(draggingSessionId, targetSessionId);
     setDraggingSessionId(null);
     setDragOverSessionId(null);
+  };
+
+  const openTabMenuAtPointer = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    sessionId: number
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void state.selectChatSession(sessionId);
+    setTabMenu({ sessionId, x: event.clientX, y: event.clientY });
   };
 
   const scrollChatToBottom = (behavior: ScrollBehavior = "auto") => {
@@ -530,6 +545,11 @@ export function ChatView() {
                   <div key={session.id} className="group relative shrink-0">
                     <button
                       draggable
+                      onMouseDown={(event) => {
+                        if (event.button === 2) {
+                          openTabMenuAtPointer(event, session.id);
+                        }
+                      }}
                       onDragStart={() => {
                         setDraggingSessionId(session.id);
                         setDragOverSessionId(session.id);
@@ -545,11 +565,7 @@ export function ChatView() {
                         setDragOverSessionId(null);
                       }}
                       onClick={() => void state.selectChatSession(session.id)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        void state.selectChatSession(session.id);
-                        setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY });
-                      }}
+                      onContextMenu={(event) => openTabMenuAtPointer(event, session.id)}
                       className={cn(
                         "flex h-8 min-w-[140px] items-center gap-2 rounded-md border px-2.5 pr-7 text-left text-xs transition",
                         draggingSessionId === session.id ? "cursor-grabbing opacity-70" : "cursor-grab",
