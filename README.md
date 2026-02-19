@@ -91,7 +91,7 @@ bun run dev:daemon
 ### Local Development Install (from source)
 
 ```bash
-git clone https://github.com/toby/OpenCorpo.git
+git clone https://github.com/BagelHole/OpenCorpo.git
 cd OpenCorpo
 npm install
 npm run dev:desktop
@@ -202,6 +202,9 @@ Expect:
 - richer workspace patch previews in the desktop UI
 - release channel automation (stable/beta/dev)
 - version control
+- centralized admin server that ingests audit logs from instances
+- more models + providers
+- more custom integrations/plugins
 
 ## Contributing
 
