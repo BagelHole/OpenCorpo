@@ -39,6 +39,11 @@
   "mac": {
     "target": ["dmg", "zip"],
     "category": "public.app-category.business",
+    "icon": "build/icon.icns",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "assets/entitlements.mac.plist",
+    "entitlementsInherit": "assets/entitlements.mac.plist",
     "artifactName": "OpenCorpo-${version}-mac-${arch}.${ext}"
   },
   "win": {

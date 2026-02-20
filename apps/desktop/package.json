@@ -1,6 +1,6 @@
 {
   "name": "@opencorpo/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop-first OpenCorpo application",
   "homepage": "https://github.com/BagelHole/OpenCorpo",
@@ -14,11 +14,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "prepare:bun-runtime": "node scripts/prepare-bun-runtime.mjs",
+    "prepare:mac-icon": "node scripts/prepare-macos-icon.mjs",
     "build:daemon": "npm --prefix ../daemon run build",
-    "pack": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --dir --config electron-builder.json",
-    "dist": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json",
+    "pack": "npm run build:daemon && npm run prepare:bun-runtime && npm run prepare:mac-icon && npm run build && electron-builder --dir --config electron-builder.json",
+    "dist": "npm run build:daemon && npm run prepare:bun-runtime && npm run prepare:mac-icon && npm run build && electron-builder --config electron-builder.json",
     "dist:win": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --win",
-    "dist:mac": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --mac",
+    "dist:mac": "npm run build:daemon && npm run prepare:bun-runtime && npm run prepare:mac-icon && npm run build && electron-builder --config electron-builder.json --mac",
     "dist:linux": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --linux"
   },
   "dependencies": {

@@ -58,7 +58,8 @@ const runtimeState = {
   daemonPid: null,
   daemonReady: false,
   daemonRunning: false,
-  lastError: null
+  lastError: null,
+  attemptedUiRecovery: false
 };
 let daemonProcess = null;
 let daemonRestartTimer = null;
@@ -178,8 +179,38 @@ function appendDaemonLog(line) {
   }
 }
 
+function restoreRuntimeUiConfig(reason = "unknown") {
+  const runtimeUiPath = path.join(runtimeConfig.configDir, "ui", "desktop.json");
+  const templateUiPath = path.join(templateRoot, "config", "ui", "desktop.json");
+  if (!existsSync(templateUiPath)) return false;
+  const backupPath = `${runtimeUiPath}.invalid-${Date.now()}.bak`;
+  try {
+    mkdirSync(path.dirname(runtimeUiPath), { recursive: true });
+    if (existsSync(runtimeUiPath)) {
+      copyFileSync(runtimeUiPath, backupPath);
+    }
+    copyFileSync(templateUiPath, runtimeUiPath);
+    appendDaemonLog(
+      `Recovered runtime UI config from template (${reason}). Backed up old file to ${backupPath}`
+    );
+    return true;
+  } catch (error) {
+    appendDaemonLog(
+      `Failed to recover runtime UI config (${reason}): ${error instanceof Error ? error.message : String(error)}`
+    );
+    return false;
+  }
+}
+
 function syncTemplateIntoRuntime(source, target) {
   if (!existsSync(source)) return;
+  const normalizedSource = path.resolve(source);
+  const normalizedTarget = path.resolve(target);
+  const comparableSource =
+    process.platform === "win32" ? normalizedSource.toLowerCase() : normalizedSource;
+  const comparableTarget =
+    process.platform === "win32" ? normalizedTarget.toLowerCase() : normalizedTarget;
+  if (comparableSource === comparableTarget) return;
   mkdirSync(path.dirname(target), { recursive: true });
   // Merge template content into runtime without overwriting existing user files.
   cpSync(source, target, {
@@ -201,7 +232,6 @@ function repairRuntimeUiConfig() {
   const runtimeUiPath = path.join(runtimeConfig.configDir, "ui", "desktop.json");
   const templateUiPath = path.join(templateRoot, "config", "ui", "desktop.json");
   if (!existsSync(runtimeUiPath) || !existsSync(templateUiPath)) return;
-  const backupPath = `${runtimeUiPath}.invalid-${Date.now()}.bak`;
   try {
     const runtimeRaw = readFileSync(runtimeUiPath, "utf-8");
     const templateRaw = readFileSync(templateUiPath, "utf-8");
@@ -241,17 +271,7 @@ function repairRuntimeUiConfig() {
     writeFileSync(runtimeUiPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
     appendDaemonLog("Repaired runtime UI config by filling missing required defaults.");
   } catch (error) {
-    try {
-      if (existsSync(runtimeUiPath)) {
-        copyFileSync(runtimeUiPath, backupPath);
-      }
-      copyFileSync(templateUiPath, runtimeUiPath);
-      appendDaemonLog(
-        `Repaired runtime UI config (invalid JSON/read error). Backed up old file to ${backupPath}`
-      );
-    } catch {
-      // best effort
-    }
+    restoreRuntimeUiConfig("invalid JSON/read error");
     appendDaemonLog(
       `Failed to inspect/repair runtime UI config: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -473,6 +493,14 @@ async function startDaemon(options = {}) {
       runtimeState.lastError = text;
       console.error(`[daemon:err] ${text}`);
       appendDaemonLog(`[err] ${text}`);
+      if (
+        !runtimeState.attemptedUiRecovery &&
+        text.includes("Control Plane validation failed") &&
+        text.includes("ui/desktop.json")
+      ) {
+        runtimeState.attemptedUiRecovery = true;
+        restoreRuntimeUiConfig("control plane validation failure");
+      }
     }
   });
   daemonProcess.on("error", (err) => {
@@ -499,6 +527,7 @@ async function startDaemon(options = {}) {
     console.log("[daemon] Health check passed, daemon is ready.");
     daemonRestartAttempts = 0;
     clearRestartTimer();
+    runtimeState.attemptedUiRecovery = false;
   } else {
     console.error("[daemon] Health check timed out after 15s.");
   }

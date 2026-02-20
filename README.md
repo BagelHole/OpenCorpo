@@ -185,7 +185,7 @@ Cross-platform note: build each target on its native OS (Windows for `.exe`, mac
 
 ### Release (GitHub + Website Downloads)
 
-Current desktop version: `0.1.0`
+Current desktop version: `0.1.1`
 
 1. Build artifacts locally:
 
@@ -197,8 +197,8 @@ npm run dist:desktop
 3. To auto-build and auto-upload from CI, push a release tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The workflow at `.github/workflows/release-desktop.yml` builds macOS, Windows, and Linux packages and publishes them to that GitHub release.
