@@ -14,6 +14,7 @@ build/
 out/
 *.tsbuildinfo
 apps/desktop/.runtime/
+apps/desktop/.runtime/bun/bin/bun
 
 # Database & runtime data
 data/

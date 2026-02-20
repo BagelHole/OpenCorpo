@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./OpenCorpo.png" alt="OpenCorpo" width="1000" />
 
-  **OpenCorpo: Self-editing, local-first operating system powered by an AI operator.**
+  **OpenCorpo: Self-editing, local-first application powered by an AI operator.**
 
   <p>
     <a href="#quick-start">Quick Start</a> •
@@ -25,9 +25,9 @@
 
 ---
 
-## OpenCorpo: Local-First AI OS
+## OpenCorpo: Local-First AI Application
 
-OpenCorpo is an **AI-powered operating system** you run locally.  
+OpenCorpo is an **AI-powered application** you run locally.  
 It combines **agent chat, job automation, approvals, auditing, and self-editing UI/workflow config** in one desktop app.
 
 If you are searching for:
@@ -40,7 +40,7 @@ OpenCorpo is built for exactly that direction.
 
 ## What OpenCorpo Is
 
-OpenCorpo is a desktop-first, local AI operating system for business workflows.
+OpenCorpo is a desktop-first, local AI application for all workflows.
 
 It combines:
 - an Electron desktop app for chat, approvals, audits, and operations
