@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./OpenCorpo.png" alt="OpenCorpo" width="1000" />
 
-  **OpenCorpo: local-first AI operating system for jobs, automation, and self-editing workflows.**
+  **OpenCorpo: Self-editing, local-first operating system powered by an AI operator.**
 
   <p>
     <a href="#quick-start">Quick Start</a> •
