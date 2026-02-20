@@ -108,7 +108,7 @@ const EMPTY_AI_PROVIDER_CATALOG: AiProviderCatalog = {
   providers: [],
 };
 
-const ONBOARDING_KEY = "opencorpo_onboarding_v2";
+const ONBOARDING_KEY = "opencorpo_onboarding_v3";
 const ACTIVE_CHAT_SESSION_KEY = "opencorpo_active_chat_session";
 const CHAT_SESSIONS_CACHE_KEY = "opencorpo_chat_sessions_cache_v1";
 const CHAT_MESSAGES_CACHE_KEY = "opencorpo_chat_messages_cache_v1";
@@ -635,40 +635,38 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProfileAndModels = useCallback(async (client: OpenCorpoApi) => {
-    const [profileRes, modelRes, providerRes, scriptSecretsRes, scriptModeRes, mcpSettingsRes] = await Promise.all([
-      client.getProfile(),
-      client.getAiModelDefaults(),
-      client.getAiProviderCatalog(),
-      client.getScriptSecrets(),
-      client.getScriptExecutionMode(),
-      client.getMcpSettings()
-    ]);
-    if (profileRes.ok) {
-      setProfile(profileRes.data.profile);
-      setOnboarding((current) => {
-        const next = {
-          ...current,
-          profile: profileRes.data.profile,
-        };
-        writeOnboarding(next);
-        return next;
-      });
-    }
-    if (modelRes.ok) {
-      setAiModelDefaults(modelRes.data.defaults);
-    }
-    if (providerRes.ok) {
-      setAiProviderCatalog(providerRes.data);
-    }
-    if (scriptSecretsRes.ok) {
-      setScriptSecrets(scriptSecretsRes.data.items ?? []);
-    }
-    if (scriptModeRes.ok) {
-      setScriptExecutionMode(scriptModeRes.data.mode ?? "safe");
-    }
-    if (mcpSettingsRes.ok) {
-      setMcpSettings(mcpSettingsRes.data.settings ?? DEFAULT_MCP_SETTINGS);
-    }
+    const tasks = [
+      client.getProfile().then((profileRes) => {
+        if (!profileRes.ok) return;
+        setProfile(profileRes.data.profile);
+        setOnboarding((current) => {
+          const next = {
+            ...current,
+            profile: profileRes.data.profile,
+          };
+          writeOnboarding(next);
+          return next;
+        });
+      }),
+      client.getAiModelDefaults().then((modelRes) => {
+        if (modelRes.ok) setAiModelDefaults(modelRes.data.defaults);
+      }),
+      client.getAiProviderCatalog().then((providerRes) => {
+        if (providerRes.ok) setAiProviderCatalog(providerRes.data);
+      }),
+      client.getScriptSecrets().then((scriptSecretsRes) => {
+        if (scriptSecretsRes.ok) setScriptSecrets(scriptSecretsRes.data.items ?? []);
+      }),
+      client.getScriptExecutionMode().then((scriptModeRes) => {
+        if (scriptModeRes.ok) setScriptExecutionMode(scriptModeRes.data.mode ?? "safe");
+      }),
+      client.getMcpSettings().then((mcpSettingsRes) => {
+        if (mcpSettingsRes.ok) {
+          setMcpSettings(mcpSettingsRes.data.settings ?? DEFAULT_MCP_SETTINGS);
+        }
+      }),
+    ];
+    await Promise.allSettled(tasks);
   }, []);
 
   const refreshDaemonStatus = useCallback(async () => {
@@ -713,35 +711,59 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
     const currentApi = apiRef.current;
     if (!currentApi || !daemonStatus.ready) return;
     try {
-      const [approvalsRes, jobsRes, runsRes, auditRes, pluginsRes, toolsRes, codexRes, uiRes] =
-        await Promise.all([
-          currentApi.listApprovals(),
-          currentApi.listJobs(),
-          currentApi.listJobRuns(),
-          currentApi.listAudit(30),
-          currentApi.listPlugins(),
-          currentApi.listTools(),
-          currentApi.getCodexStatus(),
-          currentApi.getUiConfig(),
-        ]);
+      const [
+        approvalsRes,
+        jobsRes,
+        runsRes,
+        auditRes,
+        pluginsRes,
+        toolsRes,
+        codexRes,
+        uiRes,
+      ] = await Promise.allSettled([
+        currentApi.listApprovals(),
+        currentApi.listJobs(),
+        currentApi.listJobRuns(),
+        currentApi.listAudit(30),
+        currentApi.listPlugins(),
+        currentApi.listTools(),
+        currentApi.getCodexStatus(),
+        currentApi.getUiConfig(),
+      ]);
 
-      if (approvalsRes.ok) setApprovals(approvalsRes.data.items ?? []);
-      if (jobsRes.ok) setJobs(jobsRes.data.items ?? []);
-      if (runsRes.ok) setJobRuns(runsRes.data.items ?? []);
-      if (auditRes.ok) setAudit(auditRes.data.items ?? []);
-      if (pluginsRes.ok) setPlugins(pluginsRes.data.items ?? []);
-      if (toolsRes.ok) setTools(toolsRes.data.items ?? []);
-      if (codexRes.ok) {
+      if (approvalsRes.status === "fulfilled" && approvalsRes.value.ok) {
+        setApprovals(approvalsRes.value.data.items ?? []);
+      }
+      if (jobsRes.status === "fulfilled" && jobsRes.value.ok) {
+        setJobs(jobsRes.value.data.items ?? []);
+      }
+      if (runsRes.status === "fulfilled" && runsRes.value.ok) {
+        setJobRuns(runsRes.value.data.items ?? []);
+      }
+      if (auditRes.status === "fulfilled" && auditRes.value.ok) {
+        setAudit(auditRes.value.data.items ?? []);
+      }
+      if (pluginsRes.status === "fulfilled" && pluginsRes.value.ok) {
+        setPlugins(pluginsRes.value.data.items ?? []);
+      }
+      if (toolsRes.status === "fulfilled" && toolsRes.value.ok) {
+        setTools(toolsRes.value.data.items ?? []);
+      }
+      if (codexRes.status === "fulfilled" && codexRes.value.ok) {
         setCodexStatus({
-          connected: codexRes.data.connected,
-          provider: codexRes.data.provider,
-          accountId: codexRes.data.accountId,
-          expiresAt: codexRes.data.expiresAt,
-          refreshConfigured: codexRes.data.refreshConfigured
+          connected: codexRes.value.data.connected,
+          provider: codexRes.value.data.provider,
+          accountId: codexRes.value.data.accountId,
+          expiresAt: codexRes.value.data.expiresAt,
+          refreshConfigured: codexRes.value.data.refreshConfigured
         });
       }
-      if (uiRes.ok && isValidUiConfig(uiRes.data.config)) {
-        setUiConfig(uiRes.data.config);
+      if (
+        uiRes.status === "fulfilled" &&
+        uiRes.value.ok &&
+        isValidUiConfig(uiRes.value.data.config)
+      ) {
+        setUiConfig(uiRes.value.data.config);
       }
       setApiError(null);
     } catch (error) {
@@ -787,16 +809,25 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
       return;
     }
     let sessions = sessionsRes.data.items.map((item) => mapSessionRow(item));
+    let createdSessionId: number | null = null;
     if (sessions.length === 0) {
       const created = await currentApi.createChatSession("New conversation", {
         emoji: "💬",
         color: "slate",
       });
       if (created.ok) {
-        const reread = await currentApi.listSessions();
-        if (reread.ok) {
-          sessions = reread.data.items.map((item) => mapSessionRow(item));
-        }
+        createdSessionId = created.data.id;
+        sessions = [
+          {
+            id: created.data.id,
+            title: "New conversation",
+            metadata: { emoji: "💬", color: "slate" },
+          },
+        ];
+        setChatMessagesBySession((current) => ({
+          ...current,
+          [created.data.id]: current[created.data.id] ?? [],
+        }));
       }
     }
     setChatSessions(sessions);
@@ -809,7 +840,24 @@ export function OpenCorpoProvider({ children }: { children: ReactNode }) {
           ? preferredSessionId
           : sessions[0]?.id ?? null;
     if (activeCandidate !== null) {
-      await selectChatSession(activeCandidate);
+      setActiveChatSessionId(activeCandidate);
+      persistActiveSession(activeCandidate);
+      const hasMessagesCached = Boolean(chatMessagesBySessionRef.current[activeCandidate]);
+      if (!hasMessagesCached && createdSessionId !== activeCandidate) {
+        const messagesRes = await currentApi.listMessages(activeCandidate);
+        if (messagesRes.ok) {
+          setChatMessagesBySession((current) => ({
+            ...current,
+            [activeCandidate]: messagesRes.data.items.map((msg) => ({
+              id: msg.id,
+              role:
+                msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+              content: msg.content,
+              ts: msg.ts,
+            })),
+          }));
+        }
+      }
     } else {
       setActiveChatSessionId(null);
       persistActiveSession(null);

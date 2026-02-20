@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, splitVendorChunkPlugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   base: "./",
   root: "renderer",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), splitVendorChunkPlugin()],
   server: {
     host: "127.0.0.1",
     port: 5173,
@@ -44,6 +44,7 @@ export default defineConfig({
   },
   build: {
     outDir: "../dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 700
   }
 });

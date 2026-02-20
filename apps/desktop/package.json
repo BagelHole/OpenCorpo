@@ -1,6 +1,6 @@
 {
   "name": "@opencorpo/desktop",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "private": true,
   "description": "Desktop-first OpenCorpo application",
   "homepage": "https://github.com/toby/OpenCorpo",
@@ -14,8 +14,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "prepare:bun-runtime": "node scripts/prepare-bun-runtime.mjs",
-    "pack": "npm run prepare:bun-runtime && npm run build && electron-builder --dir --config electron-builder.json",
-    "dist": "npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json"
+    "build:daemon": "npm --prefix ../daemon run build",
+    "pack": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --dir --config electron-builder.json",
+    "dist": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json",
+    "dist:win": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --win",
+    "dist:mac": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --mac",
+    "dist:linux": "npm run build:daemon && npm run prepare:bun-runtime && npm run build && electron-builder --config electron-builder.json --linux"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.0",
@@ -32,7 +36,8 @@
     "react-router-dom": "^7.2.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -41,7 +46,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^8.2.2",
-    "electron": "^35.7.5",
+    "electron": "35.7.5",
     "electron-builder": "^26.8.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3",

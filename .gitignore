@@ -13,6 +13,7 @@ dist/
 build/
 out/
 *.tsbuildinfo
+apps/desktop/.runtime/
 
 # Database & runtime data
 data/

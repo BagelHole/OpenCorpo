@@ -1,0 +1,82 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop distributables
+        run: npm run dist:desktop
+
+      - name: Collect release assets
+        shell: pwsh
+        run: |
+          $source = "dist/desktop"
+          $target = "out/release-assets"
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          $patterns = @("*.dmg", "*.zip", "*.exe", "*.AppImage", "*.deb", "*.blockmap", "*.yml", "*.yaml")
+          foreach ($pattern in $patterns) {
+            Get-ChildItem -Path $source -File -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination (Join-Path $target $_.Name)
+            }
+          }
+          if (-not (Get-ChildItem -Path $target -File -ErrorAction SilentlyContinue)) {
+            Write-Error "No release assets found in $source"
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.os }}
+          path: out/release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OpenCorpo ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: release-assets/*

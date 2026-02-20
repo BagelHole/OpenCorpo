@@ -45,6 +45,7 @@ import {
 import { runAgent } from "./agent";
 import { runAgentWithLLM, streamAgentWithLLM } from "./agent-llm";
 import { pluginsRoot, workspaceRoot } from "./paths";
+import { coreToolHandlers } from "./core-tool-handlers";
 import {
   createCapabilityGrant,
   getGrantByToken,
@@ -146,7 +147,7 @@ let pluginTools = pluginLoadResults
 let mcpRuntime = await buildMcpRuntimeTools(process.env.OPENCORPO_MCP_SETTINGS);
 let toolRegistry = buildToolRegistry(
   [...toolsConfig, ...mcpRuntime.definitions],
-  [...pluginTools, ...mcpRuntime.handlers]
+  [...coreToolHandlers, ...pluginTools, ...mcpRuntime.handlers]
 );
 toolRegistry.warnings.push(...mcpRuntime.warnings);
 seedJobsFromConfig(db, controlPlane.root);
@@ -268,7 +269,7 @@ async function rebuildRuntimeState() {
   mcpRuntime = await buildMcpRuntimeTools(process.env.OPENCORPO_MCP_SETTINGS);
   toolRegistry = buildToolRegistry(
     [...toolsConfig, ...mcpRuntime.definitions],
-    [...pluginTools, ...mcpRuntime.handlers]
+    [...coreToolHandlers, ...pluginTools, ...mcpRuntime.handlers]
   );
   toolRegistry.warnings.push(...mcpRuntime.warnings);
   seedJobsFromConfig(db, controlPlane.root);
@@ -415,6 +416,29 @@ function dedupeModels(models: string[], defaultModel: string): string[] {
   return out;
 }
 
+const PROVIDER_MODEL_FETCH_TIMEOUT_MS = Number(
+  process.env.OPENCORPO_PROVIDER_MODEL_FETCH_TIMEOUT_MS || 3000
+);
+const PROVIDER_MODEL_CACHE_TTL_MS = Number(
+  process.env.OPENCORPO_PROVIDER_MODEL_CACHE_TTL_MS || 5 * 60 * 1000
+);
+const providerModelCache = new Map<string, { ts: number; models: string[] }>();
+
+function getCachedProviderModels(cacheKey: string) {
+  const cached = providerModelCache.get(cacheKey);
+  if (!cached) return null;
+  const age = Date.now() - cached.ts;
+  if (age > PROVIDER_MODEL_CACHE_TTL_MS) {
+    providerModelCache.delete(cacheKey);
+    return null;
+  }
+  return cached.models;
+}
+
+function setCachedProviderModels(cacheKey: string, models: string[]) {
+  providerModelCache.set(cacheKey, { ts: Date.now(), models });
+}
+
 function getProviderApiKey(
   provider: "openai" | "anthropic" | "gateway",
   preferredProvider: string | null,
@@ -457,45 +481,67 @@ function getProviderApiKey(
 }
 
 async function listOpenAiModels(apiKey: string): Promise<string[]> {
+  const cacheKey = `openai:${apiKey}`;
+  const cached = getCachedProviderModels(cacheKey);
+  if (cached) return cached;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), PROVIDER_MODEL_FETCH_TIMEOUT_MS);
     const res = await fetch("https://api.openai.com/v1/models", {
       headers: {
         Authorization: `Bearer ${apiKey}`
-      }
+      },
+      signal: controller.signal
     });
     if (!res.ok) return [];
     const payload = (await res.json()) as {
       data?: Array<{ id?: string }>;
     };
     if (!Array.isArray(payload.data)) return [];
-    return payload.data
+    const models = payload.data
       .map((item) => (typeof item.id === "string" ? item.id.trim() : ""))
       .filter((id) => id.length > 0)
       .sort((a, b) => a.localeCompare(b));
+    setCachedProviderModels(cacheKey, models);
+    return models;
   } catch {
-    return [];
+    return cached ?? [];
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
 async function listAnthropicModels(apiKey: string): Promise<string[]> {
+  const cacheKey = `anthropic:${apiKey}`;
+  const cached = getCachedProviderModels(cacheKey);
+  if (cached) return cached;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), PROVIDER_MODEL_FETCH_TIMEOUT_MS);
     const res = await fetch("https://api.anthropic.com/v1/models", {
       headers: {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01"
-      }
+      },
+      signal: controller.signal
     });
     if (!res.ok) return [];
     const payload = (await res.json()) as {
       data?: Array<{ id?: string }>;
     };
     if (!Array.isArray(payload.data)) return [];
-    return payload.data
+    const models = payload.data
       .map((item) => (typeof item.id === "string" ? item.id.trim() : ""))
       .filter((id) => id.length > 0)
       .sort((a, b) => a.localeCompare(b));
+    setCachedProviderModels(cacheKey, models);
+    return models;
   } catch {
-    return [];
+    return cached ?? [];
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 

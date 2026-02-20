@@ -1,14 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useOpenCorpo } from "@/context/OpenCorpoContext";
-import { OnboardingWizard } from "@/views/OnboardingWizard";
-import { ChatView } from "@/views/ChatView";
-import { InboxView } from "@/views/InboxView";
-import { SettingsView } from "@/views/SettingsView";
-import { AuditView } from "@/views/AuditView";
-import { BaseUiPageView } from "@/views/BaseUiPageView";
 import { cn } from "@/lib/utils";
 import type { UiPage, UiSidebarItem } from "@/lib/api";
 
@@ -38,6 +32,17 @@ const THEME_TOKEN_TO_CSS_SUFFIX: Record<string, string> = {
 function shouldShowNavItem(item: UiSidebarItem, advancedMode: boolean) {
   if (item.showWhen === "advanced") return advancedMode;
   return true;
+}
+
+const OnboardingWizard = lazy(() => import("@/views/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })));
+const ChatView = lazy(() => import("@/views/ChatView").then((m) => ({ default: m.ChatView })));
+const InboxView = lazy(() => import("@/views/InboxView").then((m) => ({ default: m.InboxView })));
+const SettingsView = lazy(() => import("@/views/SettingsView").then((m) => ({ default: m.SettingsView })));
+const AuditView = lazy(() => import("@/views/AuditView").then((m) => ({ default: m.AuditView })));
+const BaseUiPageView = lazy(() => import("@/views/BaseUiPageView").then((m) => ({ default: m.BaseUiPageView })));
+
+function PageLoadingFallback() {
+  return <div className="rounded-md border border-[var(--oc-border)] px-3 py-2 text-sm text-[var(--oc-ink-muted)]">Loading...</div>;
 }
 
 export function App() {
@@ -207,82 +212,98 @@ export function App() {
     );
 
     if (page.kind === "base") {
-      return inScrollableShell(<BaseUiPageView page={page} />);
+      return inScrollableShell(
+        <Suspense fallback={<PageLoadingFallback />}>
+          <BaseUiPageView page={page} />
+        </Suspense>
+      );
     }
 
     if (page.builtin === "chat") {
       return (
         <div className="min-h-0 flex-1 overflow-hidden">
-          <ChatView />
+          <Suspense fallback={<PageLoadingFallback />}>
+            <ChatView />
+          </Suspense>
         </div>
       );
     }
 
     if (page.builtin === "jobs") {
       return inScrollableShell(
-        <InboxView
-          approvals={state.approvals}
-          jobs={state.jobs}
-          jobRuns={state.jobRuns}
-          onApproval={state.updateApproval}
-          onRunJob={state.runJob}
-          onToggleJob={state.toggleJob}
-        />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <InboxView
+            approvals={state.approvals}
+            jobs={state.jobs}
+            jobRuns={state.jobRuns}
+            onApproval={state.updateApproval}
+            onRunJob={state.runJob}
+            onToggleJob={state.toggleJob}
+          />
+        </Suspense>
       );
     }
 
     if (page.builtin === "settings") {
       return inScrollableShell(
-        <SettingsView
-          daemonStatus={state.daemonStatus}
-          diagnostics={state.diagnostics}
-          plugins={state.plugins}
-          codexStatus={state.codexStatus}
-          onboarding={state.onboarding}
-          profile={state.profile}
-          aiModelDefaults={state.aiModelDefaults}
-          scriptSecrets={state.scriptSecrets}
-          scriptExecutionMode={state.scriptExecutionMode}
-          mcpSettings={state.mcpSettings}
-          persistOnboarding={state.persistOnboarding}
-          onSaveProfile={state.saveProfile}
-          onSaveAiModelDefaults={state.saveAiModelDefaults}
-          onSaveScriptSecret={state.saveScriptSecret}
-          onSaveScriptExecutionMode={state.saveScriptExecutionMode}
-          onSaveMcpSettings={state.saveMcpSettings}
-          saveAiProvider={state.saveAiProvider}
-          onRestartDaemon={state.restartDaemon}
-          onRunDiagnostics={state.runDiagnosticsNow}
-          onRunRepair={state.runRepair}
-          onGetCodexOauthStart={state.getCodexOauthStart}
-          onDisconnectCodex={state.disconnectCodex}
-          onSaveAiKey={state.saveAiKey}
-          checkAiKeyConfigured={state.checkAiKeyConfigured}
-          onToggleAdvanced={setAdvancedAndPersist}
-          advancedMode={advancedMode}
-          apiBase={state.apiBase}
-        />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <SettingsView
+            daemonStatus={state.daemonStatus}
+            diagnostics={state.diagnostics}
+            plugins={state.plugins}
+            codexStatus={state.codexStatus}
+            onboarding={state.onboarding}
+            profile={state.profile}
+            aiModelDefaults={state.aiModelDefaults}
+            scriptSecrets={state.scriptSecrets}
+            scriptExecutionMode={state.scriptExecutionMode}
+            mcpSettings={state.mcpSettings}
+            persistOnboarding={state.persistOnboarding}
+            onSaveProfile={state.saveProfile}
+            onSaveAiModelDefaults={state.saveAiModelDefaults}
+            onSaveScriptSecret={state.saveScriptSecret}
+            onSaveScriptExecutionMode={state.saveScriptExecutionMode}
+            onSaveMcpSettings={state.saveMcpSettings}
+            saveAiProvider={state.saveAiProvider}
+            onRestartDaemon={state.restartDaemon}
+            onRunDiagnostics={state.runDiagnosticsNow}
+            onRunRepair={state.runRepair}
+            onGetCodexOauthStart={state.getCodexOauthStart}
+            onDisconnectCodex={state.disconnectCodex}
+            onSaveAiKey={state.saveAiKey}
+            checkAiKeyConfigured={state.checkAiKeyConfigured}
+            onToggleAdvanced={setAdvancedAndPersist}
+            advancedMode={advancedMode}
+            apiBase={state.apiBase}
+          />
+        </Suspense>
       );
     }
 
     return advancedMode
-      ? inScrollableShell(<AuditView audit={state.audit} />)
+      ? inScrollableShell(
+          <Suspense fallback={<PageLoadingFallback />}>
+            <AuditView audit={state.audit} />
+          </Suspense>
+        )
       : <Navigate to={defaultPath} replace />;
   };
 
   if (!state.onboarding.completed) {
     return (
       <div className="min-h-screen bg-[var(--oc-bg)] flex items-center justify-center p-4">
-        <OnboardingWizard
-          onboarding={state.onboarding}
-          persistOnboarding={state.persistOnboarding}
-          completeOnboarding={state.completeOnboarding}
-          saveAiKey={state.saveAiKey}
-          saveProfile={state.saveProfile}
-          saveAiProvider={state.saveAiProvider}
-          checkAiKeyConfigured={state.checkAiKeyConfigured}
-          getCodexOauthStart={state.getCodexOauthStart}
-        />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <OnboardingWizard
+            onboarding={state.onboarding}
+            persistOnboarding={state.persistOnboarding}
+            completeOnboarding={state.completeOnboarding}
+            saveAiKey={state.saveAiKey}
+            saveProfile={state.saveProfile}
+            saveAiProvider={state.saveAiProvider}
+            checkAiKeyConfigured={state.checkAiKeyConfigured}
+            getCodexOauthStart={state.getCodexOauthStart}
+          />
+        </Suspense>
       </div>
     );
   }

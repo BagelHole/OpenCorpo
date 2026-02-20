@@ -1,10 +1,14 @@
 <div align="center">
   <img src="./OpenCorpo.png" alt="OpenCorpo" width="1000" />
 
-  **Self-editing, local-first business operating system powered by an AI operator.**
+  **OpenCorpo: local-first AI operating system for jobs, automation, and self-editing workflows.**
+
+  <img src="./OpenCorpo.gif" alt="OpenCorpo demo" width="1000" />
 
   <p>
     <a href="#quick-start">Quick Start</a> •
+    <a href="#features">Features</a> •
+    <a href="#use-cases">Use Cases</a> •
     <a href="#installation">Installation</a> •
     <a href="#architecture">Architecture</a> •
     <a href="#security-model">Security</a> •
@@ -21,6 +25,19 @@
 
 ---
 
+## OpenCorpo: Local-First AI OS
+
+OpenCorpo is an **AI-powered operating system** you run locally.  
+It combines **agent chat, job automation, approvals, auditing, and self-editing UI/workflow config** in one desktop app.
+
+If you are searching for:
+- local-first AI automation platform
+- AI workflow engine for desktop
+- self-hosted AI operations tool
+- AI agent with approvals and audit logs
+
+OpenCorpo is built for exactly that direction.
+
 ## What OpenCorpo Is
 
 OpenCorpo is a desktop-first, local AI operating system for business workflows.
@@ -31,6 +48,19 @@ It combines:
 - a declarative control plane the AI can edit safely
 
 The design goal is simple: **let AI act without making your system dangerous**.
+
+## Features
+
+- Local-first desktop runtime (Electron + Bun daemon)
+- AI chat + operations control from one app
+- Scheduled and manual jobs with run history
+- Control-plane driven product surface (`config/**/*.json`)
+- Self-edit proposals with validation and approval flow
+- Built-in audit logs for sensitive actions
+- Policy/risk gates for tool execution
+- Tool/plugin model for extensibility
+- UI builder blocks (`markdown`, `stats`, `note`, `job_table`, `react_widget`, `web_embed`, `terminal_widget`)
+- Multi-platform packaging targets (Windows, macOS, Linux)
 
 ## Self-Editing
 
@@ -51,6 +81,36 @@ Most AI products stop at chat. OpenCorpo is built for execution:
 - schedule recurring jobs
 - reconfigure workflows through validated JSON
 - keep every important action auditable
+
+## Use Cases
+
+- Internal operations copilots for founder teams
+- Automated trend, market, or competitor monitoring
+- Agent-driven dashboards backed by recurring jobs
+- Approval-gated workflow automation for sensitive tasks
+- Local development sandbox for autonomous business tooling
+
+## Feature Highlights
+
+### 1) Job Engine + Scheduling
+- Queue and run jobs manually or on schedule
+- Observe run states (`queued`, `running`, `completed`, `failed`, `waiting_approval`)
+- Render job outputs directly into UI blocks
+
+### 2) Safe Agent Actions
+- Policy checks before tool execution
+- High-risk flows can require human approval
+- Capability-scoped tool access instead of unrestricted execution
+
+### 3) Self-Editing Control Plane
+- Propose and apply schema-validated config changes
+- Update pages, tools, jobs, workflows, and policy with diffs
+- Keep edits auditable and reversible through version control
+
+### 4) Desktop-First Operator Experience
+- Onboarding + provider setup
+- Chat, Jobs, Settings, and Audit views
+- Built-in daemon supervision and health checks
 
 ## Inspired By OpenClaw
 
@@ -116,6 +176,32 @@ npm run dist:desktop
 ```
 
 Packaged desktop builds can bundle Bun via `apps/desktop/scripts/prepare-bun-runtime.mjs` when Bun is available on the build machine.
+Release artifacts are written to `dist/desktop/`.
+Platform-specific commands:
+- `npm run dist:desktop:win`
+- `npm run dist:desktop:mac`
+- `npm run dist:desktop:linux`
+Cross-platform note: build each target on its native OS (Windows for `.exe`, macOS for `.dmg`, Linux for `.AppImage/.deb`) or use CI matrix builds.
+
+### Release (GitHub + Website Downloads)
+
+Current desktop version: `0.1.0`
+
+1. Build artifacts locally:
+
+```bash
+npm run dist:desktop
+```
+
+2. Upload files from `dist/desktop/` to a GitHub Release (recommended assets: `.exe`, `.dmg`, `.AppImage`, `.deb`, `.zip`).
+3. To auto-build and auto-upload from CI, push a release tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow at `.github/workflows/release-desktop.yml` builds macOS, Windows, and Linux packages and publishes them to that GitHub release.
 
 ## Developer Commands
 
@@ -205,6 +291,7 @@ Expect:
 - centralized admin server that ingests audit logs from instances
 - more models + providers
 - more custom integrations/plugins
+- background daemon running 24/7 - allow agent to work all day
 
 ## Contributing
 

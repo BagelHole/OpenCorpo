@@ -2,7 +2,15 @@ import "dotenv/config";
 import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  createWriteStream,
+  copyFileSync
+} from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { runAiChat } from "./ai.mjs";
@@ -29,7 +37,9 @@ const runtimeConfig = isDev
       userlandDir: path.join(projectRoot, "userland"),
       workspaceDir: path.join(projectRoot, "userland", "workspace"),
       secretsDir: path.join(runtimeRoot, "secrets"),
-      tokenPath: path.join(runtimeRoot, "launch_token")
+      tokenPath: path.join(runtimeRoot, "launch_token"),
+      logsDir: path.join(runtimeRoot, "logs"),
+      daemonLogPath: path.join(runtimeRoot, "logs", "daemon.log")
     }
   : {
       root: runtimeRoot,
@@ -39,7 +49,9 @@ const runtimeConfig = isDev
       userlandDir: path.join(runtimeRoot, "userland"),
       workspaceDir: path.join(runtimeRoot, "userland", "workspace"),
       secretsDir: path.join(runtimeRoot, "data", "secrets"),
-      tokenPath: path.join(runtimeRoot, "launch_token")
+      tokenPath: path.join(runtimeRoot, "launch_token"),
+      logsDir: path.join(runtimeRoot, "logs"),
+      daemonLogPath: path.join(runtimeRoot, "logs", "daemon.log")
     };
 const runtimeState = {
   launchToken: "",
@@ -153,25 +165,102 @@ function ensureRuntimeDirectory() {
   mkdirSync(runtimeConfig.dataDir, { recursive: true });
   mkdirSync(runtimeConfig.secretsDir, { recursive: true });
   mkdirSync(runtimeConfig.workspaceDir, { recursive: true });
+  mkdirSync(runtimeConfig.logsDir, { recursive: true });
 }
 
-function copyTemplateIfMissing(source, target) {
-  if (existsSync(target)) return;
+function appendDaemonLog(line) {
+  try {
+    const stream = createWriteStream(runtimeConfig.daemonLogPath, { flags: "a" });
+    stream.write(`[${new Date().toISOString()}] ${line}\n`);
+    stream.end();
+  } catch {
+    // best-effort logging only
+  }
+}
+
+function syncTemplateIntoRuntime(source, target) {
   if (!existsSync(source)) return;
   mkdirSync(path.dirname(target), { recursive: true });
-  cpSync(source, target, { recursive: true });
+  // Merge template content into runtime without overwriting existing user files.
+  cpSync(source, target, {
+    recursive: true,
+    force: false,
+    errorOnExist: false
+  });
 }
 
 function bootstrapRuntimeLayout() {
   ensureRuntimeDirectory();
-  copyTemplateIfMissing(path.join(templateRoot, "config"), runtimeConfig.configDir);
-  copyTemplateIfMissing(path.join(templateRoot, "plugins"), runtimeConfig.pluginsDir);
-  copyTemplateIfMissing(path.join(templateRoot, "userland"), runtimeConfig.userlandDir);
+  syncTemplateIntoRuntime(path.join(templateRoot, "config"), runtimeConfig.configDir);
+  syncTemplateIntoRuntime(path.join(templateRoot, "plugins"), runtimeConfig.pluginsDir);
+  syncTemplateIntoRuntime(path.join(templateRoot, "userland"), runtimeConfig.userlandDir);
+  repairRuntimeUiConfig();
+}
+
+function repairRuntimeUiConfig() {
+  const runtimeUiPath = path.join(runtimeConfig.configDir, "ui", "desktop.json");
+  const templateUiPath = path.join(templateRoot, "config", "ui", "desktop.json");
+  if (!existsSync(runtimeUiPath) || !existsSync(templateUiPath)) return;
+  const backupPath = `${runtimeUiPath}.invalid-${Date.now()}.bak`;
+  try {
+    const runtimeRaw = readFileSync(runtimeUiPath, "utf-8");
+    const templateRaw = readFileSync(templateUiPath, "utf-8");
+    const parsed = JSON.parse(runtimeRaw);
+    const template = JSON.parse(templateRaw);
+    if (!parsed || typeof parsed !== "object" || !template || typeof template !== "object") return;
+
+    let changed = false;
+    const next = { ...parsed };
+    if (typeof next.name !== "string" || !next.name.trim()) {
+      next.name = template.name;
+      changed = true;
+    }
+
+    if (!next.sidebar || typeof next.sidebar !== "object") {
+      next.sidebar = template.sidebar;
+      changed = true;
+    } else {
+      const sidebar = { ...next.sidebar };
+      if (typeof sidebar.collapsible !== "boolean") {
+        sidebar.collapsible = template.sidebar?.collapsible ?? true;
+        changed = true;
+      }
+      if (!Array.isArray(sidebar.items) || sidebar.items.length === 0) {
+        sidebar.items = Array.isArray(template.sidebar?.items) ? template.sidebar.items : [];
+        changed = true;
+      }
+      next.sidebar = sidebar;
+    }
+
+    if (!Array.isArray(next.pages) || next.pages.length === 0) {
+      next.pages = Array.isArray(template.pages) ? template.pages : [];
+      changed = true;
+    }
+
+    if (!changed) return;
+    writeFileSync(runtimeUiPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+    appendDaemonLog("Repaired runtime UI config by filling missing required defaults.");
+  } catch (error) {
+    try {
+      if (existsSync(runtimeUiPath)) {
+        copyFileSync(runtimeUiPath, backupPath);
+      }
+      copyFileSync(templateUiPath, runtimeUiPath);
+      appendDaemonLog(
+        `Repaired runtime UI config (invalid JSON/read error). Backed up old file to ${backupPath}`
+      );
+    } catch {
+      // best effort
+    }
+    appendDaemonLog(
+      `Failed to inspect/repair runtime UI config: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 function daemonEntryPath() {
   if (isDev) return path.join(projectRoot, "apps/daemon/src/index.ts");
-  return path.join(process.resourcesPath, "daemon", "src", "index.ts");
+  return path.join(process.resourcesPath, "daemon", "index.mjs");
 }
 
 function resolveBunCommand() {
@@ -222,7 +311,8 @@ async function waitForDaemonReady(timeoutMs = 15000) {
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
   runtimeState.daemonReady = false;
-  runtimeState.lastError = "Daemon health check timed out.";
+  runtimeState.lastError = `Daemon health check timed out. See logs: ${runtimeConfig.daemonLogPath}`;
+  appendDaemonLog(runtimeState.lastError);
   return false;
 }
 
@@ -260,6 +350,7 @@ function buildDaemonEnv() {
     OPENCORPO_PROJECT_ROOT: projectRoot,
     OPENCORPO_DATA_DIR: runtimeConfig.dataDir,
     OPENCORPO_CONFIG_DIR: runtimeConfig.configDir,
+    OPENCORPO_SCHEMA_DIR: path.join(runtimeConfig.configDir, "schemas"),
     OPENCORPO_PLUGINS_DIR: runtimeConfig.pluginsDir,
     OPENCORPO_USERLAND_DIR: runtimeConfig.userlandDir,
     OPENCORPO_SECRETS_DIR: runtimeConfig.secretsDir,
@@ -267,6 +358,9 @@ function buildDaemonEnv() {
     OPENCORPO_LAUNCH_TOKEN: runtimeState.launchToken,
     OPENCORPO_PORT: String(daemonPort)
   };
+  if (!isDev) {
+    env.OPENCORPO_ALLOW_INVALID_CONTROL_PLANE = "true";
+  }
   const aiKey = loadAiKeyFromSecrets();
   if (aiKey) {
     env.AI_GATEWAY_API_KEY = aiKey;
@@ -349,11 +443,15 @@ async function startDaemon(options = {}) {
   const command = resolveBunCommand();
   const daemonEntry = daemonEntryPath();
   console.log(`[daemon] Spawning: ${command} run ${daemonEntry}`);
-  console.log(`[daemon] CWD: ${projectRoot}`);
+  const daemonCwd = isDev ? projectRoot : runtimeConfig.root;
+  console.log(`[daemon] CWD: ${daemonCwd}`);
   console.log(`[daemon] Data dir: ${runtimeConfig.dataDir}`);
+  appendDaemonLog(`Spawning: ${command} run ${daemonEntry}`);
+  appendDaemonLog(`CWD: ${daemonCwd}`);
+  appendDaemonLog(`Data dir: ${runtimeConfig.dataDir}`);
 
   daemonProcess = spawn(command, ["run", daemonEntry], {
-    cwd: projectRoot,
+    cwd: daemonCwd,
     env: buildDaemonEnv(),
     windowsHide: true
   });
@@ -364,22 +462,28 @@ async function startDaemon(options = {}) {
   console.log(`[daemon] Spawned with PID ${runtimeState.daemonPid}`);
 
   daemonProcess.stdout?.on("data", (chunk) => {
-    console.log(`[daemon:out] ${String(chunk).trim()}`);
+    const text = String(chunk).trim();
+    if (!text) return;
+    console.log(`[daemon:out] ${text}`);
+    appendDaemonLog(`[out] ${text}`);
   });
   daemonProcess.stderr?.on("data", (chunk) => {
     const text = String(chunk).trim();
     if (text) {
       runtimeState.lastError = text;
       console.error(`[daemon:err] ${text}`);
+      appendDaemonLog(`[err] ${text}`);
     }
   });
   daemonProcess.on("error", (err) => {
     console.error(`[daemon] Spawn error: ${err.message}`);
-    runtimeState.lastError = `Failed to spawn daemon: ${err.message}`;
+    runtimeState.lastError = `Failed to spawn daemon: ${err.message}. See logs: ${runtimeConfig.daemonLogPath}`;
     runtimeState.daemonRunning = false;
+    appendDaemonLog(runtimeState.lastError);
   });
   daemonProcess.on("exit", (code, signal) => {
     console.log(`[daemon] Exited with code=${code}, signal=${signal}`);
+    appendDaemonLog(`Exited with code=${code}, signal=${signal}`);
     runtimeState.daemonRunning = false;
     runtimeState.daemonReady = false;
     runtimeState.daemonPid = null;

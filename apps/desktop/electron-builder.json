@@ -9,8 +9,8 @@
   ],
   "extraResources": [
     {
-      "from": "../daemon/src",
-      "to": "daemon/src"
+      "from": "../daemon/dist/index.mjs",
+      "to": "daemon/index.mjs"
     },
     {
       "from": "../../config",
@@ -38,16 +38,19 @@
   },
   "mac": {
     "target": ["dmg", "zip"],
-    "category": "public.app-category.business"
+    "category": "public.app-category.business",
+    "artifactName": "OpenCorpo-${version}-mac-${arch}.${ext}"
   },
   "win": {
-    "target": ["nsis", "zip"]
+    "target": ["nsis", "zip"],
+    "icon": "assets/icon-256.png",
+    "artifactName": "OpenCorpo-${version}-win-${arch}.${ext}"
   },
   "linux": {
     "target": ["AppImage", "deb"],
     "category": "Utility",
     "maintainer": "OpenCorpo Team <oss@opencorpo.ai>",
-    "artifactName": "OpenCorpo-${version}-${arch}.${ext}",
+    "artifactName": "OpenCorpo-${version}-linux-${arch}.${ext}",
     "executableName": "opencorpo"
   },
   "deb": {
