@@ -32,14 +32,40 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build desktop distributables
+      - name: Configure macOS signing/notarization
+        if: runner.os == 'macOS'
+        shell: pwsh
         env:
-          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && 'true' || 'false' }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:APPLE_CERTIFICATE_P12_BASE64)
+          $hasCertPassword = -not [string]::IsNullOrWhiteSpace($env:APPLE_CERTIFICATE_PASSWORD)
+          $hasNotary = (
+            -not [string]::IsNullOrWhiteSpace($env:APPLE_ID) -and
+            -not [string]::IsNullOrWhiteSpace($env:APPLE_APP_SPECIFIC_PASSWORD) -and
+            -not [string]::IsNullOrWhiteSpace($env:APPLE_TEAM_ID)
+          )
+
+          if ($hasCert -and $hasCertPassword -and $hasNotary) {
+            "CSC_LINK=$($env:APPLE_CERTIFICATE_P12_BASE64)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_KEY_PASSWORD=$($env:APPLE_CERTIFICATE_PASSWORD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_IDENTITY_AUTO_DISCOVERY=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "APPLE_ID=$($env:APPLE_ID)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "APPLE_APP_SPECIFIC_PASSWORD=$($env:APPLE_APP_SPECIFIC_PASSWORD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "APPLE_TEAM_ID=$($env:APPLE_TEAM_ID)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Apple signing + notarization enabled."
+          } else {
+            "CSC_LINK=" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_KEY_PASSWORD=" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_IDENTITY_AUTO_DISCOVERY=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Apple secrets missing; building unsigned/unnotarized macOS artifacts."
+          }
+
+      - name: Build desktop distributables
         run: npm run dist:desktop
 
       - name: Collect release assets
