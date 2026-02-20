@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Desktop-first OpenCorpo application",
-  "homepage": "https://github.com/toby/OpenCorpo",
+  "homepage": "https://github.com/BagelHole/OpenCorpo",
   "author": "Toby Miller <toby@opencorpo.ai> | github.com/bagelhole",
   "type": "module",
   "main": "electron/main.mjs",
