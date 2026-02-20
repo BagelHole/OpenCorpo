@@ -81,7 +81,15 @@ jobs:
 
       - name: Build desktop distributables (unsigned macOS)
         if: runner.os == 'macOS' && steps.mac_signing.outputs.sign_enabled != 'true'
-        run: npm run dist:desktop
+        shell: bash
+        run: |
+          unset CSC_LINK
+          unset CSC_KEY_PASSWORD
+          unset APPLE_ID
+          unset APPLE_APP_SPECIFIC_PASSWORD
+          unset APPLE_TEAM_ID
+          export CSC_IDENTITY_AUTO_DISCOVERY=false
+          npm run dist:desktop
 
       - name: Collect release assets
         shell: pwsh
