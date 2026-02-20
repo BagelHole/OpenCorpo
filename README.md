@@ -3,8 +3,6 @@
 
   **OpenCorpo: local-first AI operating system for jobs, automation, and self-editing workflows.**
 
-  <img src="./OpenCorpo.gif" alt="OpenCorpo demo" width="1000" />
-
   <p>
     <a href="#quick-start">Quick Start</a> •
     <a href="#features">Features</a> •
@@ -21,6 +19,8 @@
     <img alt="Desktop" src="https://img.shields.io/badge/desktop-Electron%20%2B%20React-2563eb" />
     <img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a" />
   </p>
+
+  <img src="./OpenCorpo.gif" alt="OpenCorpo demo" width="1000" />
 </div>
 
 ---
