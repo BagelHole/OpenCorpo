@@ -129,6 +129,13 @@ export type UiBaseBlock =
       description?: string;
       url: string;
       height?: number;
+    }
+  | {
+      type: "html_embed";
+      title?: string;
+      description?: string;
+      html: string;
+      height?: number;
     };
 
 export type UiBasePage = {

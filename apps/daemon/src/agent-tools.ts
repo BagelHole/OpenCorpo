@@ -508,12 +508,13 @@ function formatUiValidationHelp(details: string[] | undefined) {
   const help = [
     "UI block validation hint:",
     'Top-level theme shape: {"theme":{"light":{"accent":"#111"},"dark":{"accent":"#fafafa"}}}.',
-    "Supported block types: markdown, stats, list, note, key_value, job_results, job_table, actions, react_widget, terminal_widget, web_embed.",
+    "Supported block types: markdown, stats, list, note, key_value, job_results, job_table, actions, react_widget, terminal_widget, web_embed, html_embed.",
     'Valid actions block shape: {"type":"actions","buttons":[{"label":"Run","action":{"type":"run_job","jobName":"my-job"}}]}',
     'Valid open_url button shape: {"label":"Docs","action":{"type":"open_url","url":"https://example.com"}}',
     'Valid react_widget shape: {"type":"react_widget","package":"pkg@1.2.3","exportName":"Widget","props":{},"height":420}',
     'Valid terminal_widget shape: {"type":"terminal_widget","command":"npx -y pkg","cwd":"userland","height":320,"allowInput":true}',
-    'Valid web_embed shape: {"type":"web_embed","url":"https://example.com/embed","height":700}'
+    'Valid web_embed shape: {"type":"web_embed","url":"https://example.com/embed","height":700}',
+    'Valid html_embed shape: {"type":"html_embed","title":"Custom","html":"<!doctype html><html><body><h1>Hello</h1></body></html>","height":700}'
   ].join(" ");
   return base ? `${base} ${help}` : help;
 }
