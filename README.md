@@ -59,7 +59,7 @@ The design goal is simple: **let AI act without making your system dangerous**.
 - Built-in audit logs for sensitive actions
 - Policy/risk gates for tool execution
 - Tool/plugin model for extensibility
-- UI builder blocks (`markdown`, `stats`, `note`, `job_table`, `react_widget`, `web_embed`, `terminal_widget`)
+- UI builder blocks (`markdown`, `stats`, `note`, `job_table`, `react_widget`, `web_embed`, `terminal_widget`, `html_embed`)
 - Multi-platform packaging targets (Windows, macOS, Linux)
 
 ## Self-Editing
@@ -70,6 +70,7 @@ Out of the box, the AI can:
 - add/edit sidebar routes and pages in `ui/desktop.json`
 - compose new pages with markdown, notes, stats, and job-driven tables
 - embed live web experiences with `web_embed` (iframe-backed blocks)
+- render fully custom, AI-authored pages with `html_embed` (raw HTML blocks)
 - add npm-powered `react_widget` components to pages
 - spin up `terminal_widget` blocks for interactive command output
 - propose config/code changes with previews, approvals, and audit trails

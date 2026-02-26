@@ -1461,6 +1461,30 @@ function BaseBlock({ block }: { block: UiBaseBlock }) {
     );
   }
 
+  if (block.type === "html_embed") {
+    const embedHeight = Math.max(200, Math.min(2400, block.height ?? 700));
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{block.title || "Custom HTML"}</CardTitle>
+          {block.description && (
+            <p className="text-sm text-[var(--oc-ink-muted)]">{block.description}</p>
+          )}
+        </CardHeader>
+        <CardContent>
+          <iframe
+            title={block.title || "custom-html"}
+            srcDoc={block.html}
+            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock"
+            referrerPolicy="no-referrer"
+            className="w-full rounded-lg border border-[var(--oc-border)] bg-[var(--oc-bg)]"
+            style={{ height: `${embedHeight}px` }}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (block.type === "react_widget") {
     const widgetHeight = Math.max(80, Math.min(2400, widgetHeightPx));
     const packageSpec = block.package.trim();

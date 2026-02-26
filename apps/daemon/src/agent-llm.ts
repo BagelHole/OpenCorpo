@@ -74,6 +74,9 @@ For CLI/TUI or command-driven tools, use:
 For hosted browser apps and game embeds, use:
 - "web_embed" block (url, optional height)
 - Prefer web_embed for archive/game/site embeds that are already hosted as web pages.
+For fully custom pages outside base JSON block constraints, use:
+- "html_embed" block (html, optional title/description/height)
+- Use html_embed when the user asks for custom layout/markup that cannot be represented well with standard blocks.
 UI generation policy:
 - Prefer npm/package-based widgets over writing custom scripts whenever the user asks for visual widgets/charts/maps/weather/media.
 - Do not create a script job for UI rendering if a suitable npm React widget exists.

@@ -344,6 +344,18 @@
                         "height": { "type": "integer", "minimum": 200, "maximum": 1800 }
                       },
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": ["type", "html"],
+                      "properties": {
+                        "type": { "type": "string", "const": "html_embed" },
+                        "title": { "type": "string" },
+                        "description": { "type": "string" },
+                        "html": { "type": "string", "minLength": 1 },
+                        "height": { "type": "integer", "minimum": 200, "maximum": 2400 }
+                      },
+                      "additionalProperties": false
                     }
                   ]
                 }
